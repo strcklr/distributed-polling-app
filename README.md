@@ -6,6 +6,16 @@ A polling service in Go, built to stay correct under failure: conditional state 
 
 - Go 1.27+
 
+## Setup
+
+After cloning, enable the repo's git hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The pre-commit hook runs `gofmt -w` on staged Go files and re-stages them. If a file that needs formatting also has unstaged changes, the commit stops and asks you to format and stage it yourself.
+
 ## Run
 
 ```bash

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs gofmt -w on staged Go files and re-stages them. A file that also has
+# unstaged changes is not re-staged, since that would commit those changes too.
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go')
+[ -z "$files" ] && exit 0
+
+unformatted=$(gofmt -l $files)
+[ -z "$unformatted" ] && exit 0
+
+for f in $unformatted; do
+	if ! git diff --quiet -- "$f"; then
+		echo "pre-commit: $f needs gofmt but has unstaged changes."
+		echo "Run 'gofmt -w $f', stage it, and commit again."
+		exit 1
+	fi
+done
+
+gofmt -w $unformatted
+git add $unformatted
+echo "pre-commit: formatted $(echo $unformatted)"
