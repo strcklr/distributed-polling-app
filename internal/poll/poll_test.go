@@ -2,6 +2,7 @@ package poll
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -49,25 +50,28 @@ func TestVote(t *testing.T) {
 func TestVoteClosesPollAfterLastVote(t *testing.T) {
 	poll := newTestPoll(t)
 	votes := []struct {
-		name        string
 		participant string
 		option      int
 	}{
-		{name: "first vote", participant: "bob", option: 0},
-		{name: "second vote", participant: "alice", option: 0},
-		{name: "final vote", participant: "billy", option: 1},
+		{participant: "bob", option: 0},
+		{participant: "alice", option: 0},
+		{participant: "billy", option: 1},
 	}
 
-	for _, tt := range votes {
+	for i, tt := range votes {
 		err := poll.Vote(tt.participant, tt.option)
 		if err != nil {
-			t.Errorf("Vote() error = %v", err)
+			t.Fatalf("Vote() error = %v", err)
+		}
+		if i < len(votes)-1 && poll.Status != StatusOpen {
+			t.Fatalf("poll closed prematurely, i: %d, vote: %v", i, tt)
 		}
 	}
 	if poll.Status != StatusClosed {
 		t.Errorf("poll did not close after everyone voted, status: %s", poll.Status)
 	}
-	if poll.Counts[0] != 2 {
-		t.Errorf("votes didn't get counted correctly")
+	want := []int{2, 1, 0}
+	if !slices.Equal(poll.Counts, want) {
+		t.Errorf("incorrect vote counts, counts = %v, want %v", poll.Counts, want)
 	}
 }
