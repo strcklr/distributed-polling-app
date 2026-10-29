@@ -23,3 +23,11 @@ func TestHealth(t *testing.T) {
 		t.Errorf(`status = %q, want "ok"`, status)
 	}
 }
+
+func TestWriteJSONMarshalError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeJSON(recorder, http.StatusOK, make(chan int))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+}

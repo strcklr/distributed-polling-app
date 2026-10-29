@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -17,10 +18,17 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// TODO: marshal before WriteHeader so a marshal error returns 500 instead of a
-// 200 with a broken body, and log write errors instead of discarding them.
 func writeJSON(w http.ResponseWriter, status int, body any) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("marshal response: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("error responding: %v", err)
+	}
 }
