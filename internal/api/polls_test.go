@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/strcklr/distributed-polling-app/internal/poll"
@@ -88,6 +89,15 @@ func TestCreatePollErrors(t *testing.T) {
 			assertErrorResponse(t, recorder, http.StatusBadRequest)
 		})
 	}
+}
+
+func TestCreatePollBodyTooLarge(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"question": "` + strings.Repeat("a", maxBodyBytes) + `", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`
+
+	recorder := doRequest(t, s, http.MethodPost, "/polls", body)
+
+	assertErrorResponse(t, recorder, http.StatusRequestEntityTooLarge)
 }
 
 func TestGetPoll(t *testing.T) {
