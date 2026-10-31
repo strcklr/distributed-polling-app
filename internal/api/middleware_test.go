@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -248,4 +249,27 @@ func TestRecoverPanicsLetsErrAbortHandlerThrough(t *testing.T) {
 		}
 	}()
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
+func TestLevelForStatus(t *testing.T) {
+	tests := []struct {
+		status int
+		want   slog.Level
+	}{
+		{status: http.StatusOK, want: slog.LevelInfo},
+		{status: http.StatusPermanentRedirect, want: slog.LevelInfo},
+		{status: 399, want: slog.LevelInfo},
+		{status: http.StatusBadRequest, want: slog.LevelWarn},
+		{status: 499, want: slog.LevelWarn},
+		{status: http.StatusInternalServerError, want: slog.LevelError},
+		{status: 599, want: slog.LevelError},
+	}
+
+	for _, tt := range tests {
+		t.Run(strconv.Itoa(tt.status), func(t *testing.T) {
+			if got := levelForStatus(tt.status); got != tt.want {
+				t.Errorf("levelForStatus(%d) = %s, want %s", tt.status, got, tt.want)
+			}
+		})
+	}
 }
