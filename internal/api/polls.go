@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -21,36 +20,22 @@ type castVoteRequest struct {
 	Option      *int   `json:"option"`
 }
 
-const maxBodyBytes = 1 << 20 // 1MiB
+const maxBodyBytes = 1 << 20
 
 func (s *Server) handleCreatePoll(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req createPollRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-
-		if errors.As(err, &maxErr) {
-			s.writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return
-		}
-
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := s.decodeRequest(w, r, &req); err != nil {
 		return
 	}
 
 	p, err := poll.New(req.Question, req.Options, req.Participants)
 	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
+		s.writeError(w, errorStatus(err), err.Error())
 		return
 	}
 
 	if err := s.store.Create(r.Context(), p); err != nil {
-		s.logger.Error("create poll",
-			slog.Any("err", err),
-			slog.String("pollID", p.ID),
-		)
-		s.writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		s.writeStoreError(w, err, "error creating poll", p.ID)
 		return
 	}
 
@@ -62,31 +47,77 @@ func (s *Server) handleGetPoll(w http.ResponseWriter, r *http.Request) {
 	pollID := r.PathValue("id")
 	p, err := s.store.Get(r.Context(), pollID)
 	if err != nil {
-		if errors.Is(err, poll.ErrNotFound) {
-			s.writeError(w, http.StatusNotFound, fmt.Sprintf("poll %s not found", pollID))
-			return
-		}
-		s.logger.Error("get poll",
-			slog.Any("err", err),
-			slog.String("pollId", pollID),
-		)
-		s.writeError(w, http.StatusInternalServerError, "error fetching poll")
+		s.writeStoreError(w, err, "error fetching poll", pollID)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, p)
 }
 
-// TODO(#7): decode castVoteRequest and cast the vote through Store.CastVote only.
-// Respond 200 with the updated poll.
 func (s *Server) handleCastVote(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	var req castVoteRequest
+	if err := s.decodeRequest(w, r, &req); err != nil {
+		return
+	}
+	if req.Option == nil {
+		s.writeError(w, http.StatusBadRequest, "option is required")
+		return
+	}
+
+	pollID := r.PathValue("id")
+
+	p, err := s.store.CastVote(r.Context(), pollID, req.Participant, *req.Option)
+	if err != nil {
+		s.writeStoreError(w, err, "error casting vote", pollID)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) writeStoreError(w http.ResponseWriter, err error, msg string, pollID string) {
+	status := errorStatus(err)
+	if status == http.StatusInternalServerError {
+		s.logger.Error(msg,
+			slog.Any("err", err),
+			slog.String("pollID", pollID),
+		)
+		s.writeError(w, http.StatusInternalServerError, msg)
+		return
+	}
+	s.writeError(w, status, err.Error())
+}
+
+func (s *Server) decodeRequest(w http.ResponseWriter, r *http.Request, req any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			s.writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return err
+		}
+
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return err
+	}
+
+	return nil
 }
 
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, map[string]string{"error": message})
 }
 
-// TODO(#7): map poll's sentinel errors to HTTP status codes.
 func errorStatus(err error) int {
-	return http.StatusInternalServerError
+	switch {
+	case errors.Is(err, poll.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, poll.ErrNotParticipant):
+		return http.StatusForbidden
+	case errors.Is(err, poll.ErrInvalidOption), errors.Is(err, poll.ErrInvalidPoll):
+		return http.StatusBadRequest
+	case errors.Is(err, poll.ErrAlreadyVoted), errors.Is(err, poll.ErrClosed):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
