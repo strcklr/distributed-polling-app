@@ -32,6 +32,17 @@ func (r *httpStatusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
+func levelForStatus(status int) slog.Level {
+	switch {
+	case status >= 500:
+		return slog.LevelError
+	case status >= 400:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -40,15 +51,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 
 		next.ServeHTTP(statusRecorder, r)
 
-		logLevel := slog.LevelInfo
-		switch {
-		case statusRecorder.status >= 500:
-			logLevel = slog.LevelError
-		case statusRecorder.status >= 400:
-			logLevel = slog.LevelWarn
-		}
-
-		s.logger.Log(r.Context(), logLevel, "request",
+		s.logger.Log(r.Context(), levelForStatus(statusRecorder.status), "request",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", statusRecorder.status),
