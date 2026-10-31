@@ -21,7 +21,7 @@ type Server struct {
 func NewServer(store poll.Store, logger *slog.Logger) *Server {
 	s := &Server{store: store, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.handler = s.logRequests(s.mux)
+	s.handler = s.logRequests(s.recoverPanics(s.mux))
 	return s
 }
 
