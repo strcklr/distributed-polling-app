@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -32,10 +33,26 @@ func doRequest(t *testing.T, s *Server, method, path, body string) *httptest.Res
 func decodeBody[T any](t *testing.T, recorder *httptest.ResponseRecorder) T {
 	t.Helper()
 	var v T
-	if err := json.NewDecoder(recorder.Body).Decode(&v); err != nil {
+	if err := json.Unmarshal(recorder.Body.Bytes(), &v); err != nil {
 		t.Fatalf("decode body %q: %v", recorder.Body.String(), err)
 	}
 	return v
+}
+
+type failingStore struct {
+	err error
+}
+
+func (f failingStore) Create(ctx context.Context, p poll.Poll) error {
+	return f.err
+}
+
+func (f failingStore) Get(ctx context.Context, id string) (poll.Poll, error) {
+	return poll.Poll{}, f.err
+}
+
+func (f failingStore) CastVote(ctx context.Context, pollID, participant string, option int) (poll.Poll, error) {
+	return poll.Poll{}, f.err
 }
 
 func TestHealth(t *testing.T) {

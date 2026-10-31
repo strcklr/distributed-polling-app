@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -121,6 +123,39 @@ func TestGetPollNotFound(t *testing.T) {
 	s, _ := newTestServer(t)
 	recorder := doRequest(t, s, http.MethodGet, "/polls/missing", "")
 	assertErrorResponse(t, recorder, http.StatusNotFound)
+}
+
+func TestStoreErrorsReturn500(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "create poll", method: http.MethodPost, path: "/polls", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
+		{name: "get poll", method: http.MethodGet, path: "/polls/abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storeErr := errors.New("store is down")
+			var buf bytes.Buffer
+			s := NewServer(failingStore{err: storeErr}, slog.New(slog.NewJSONHandler(&buf, nil)))
+
+			recorder := doRequest(t, s, tt.method, tt.path, tt.body)
+
+			assertErrorResponse(t, recorder, http.StatusInternalServerError)
+			if body := recorder.Body.String(); strings.Contains(body, storeErr.Error()) {
+				t.Errorf("response %q leaks the internal error", body)
+			}
+			logged := slices.ContainsFunc(logLines(t, &buf), func(entry map[string]any) bool {
+				return entry["level"] == "ERROR" && entry["err"] == storeErr.Error()
+			})
+			if !logged {
+				t.Errorf("store error was not logged at ERROR: %v", logLines(t, &buf))
+			}
+		})
+	}
 }
 
 func TestCastVote(t *testing.T) {
