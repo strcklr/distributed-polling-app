@@ -1,7 +1,12 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+
+	"github.com/strcklr/distributed-polling-app/internal/poll"
 )
 
 type createPollRequest struct {
@@ -15,10 +20,41 @@ type castVoteRequest struct {
 	Option      *int   `json:"option"`
 }
 
-// TODO(#5): decode createPollRequest, build the poll with poll.New, store it,
-// and respond 201 with the poll and a Location header.
+const maxBodyBytes = 1 << 20 // 1MiB
+
 func (s *Server) handleCreatePoll(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var req createPollRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+
+		if errors.As(err, &maxErr) {
+			s.writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	p, err := poll.New(req.Question, req.Options, req.Participants)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.store.Create(r.Context(), p); err != nil {
+		s.logger.Error("create poll",
+			slog.Any("err", err),
+			slog.String("pollID", p.ID),
+		)
+		s.writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+
+	w.Header().Set("Location", "/polls/"+p.ID)
+	s.writeJSON(w, http.StatusCreated, p)
 }
 
 // TODO(#6): respond 200 with the poll for the {id} path value.
