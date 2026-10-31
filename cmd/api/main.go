@@ -2,11 +2,12 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
 	"github.com/strcklr/distributed-polling-app/internal/api"
+	"github.com/strcklr/distributed-polling-app/internal/poll"
 )
 
 func main() {
@@ -15,8 +16,12 @@ func main() {
 		addr = ":8080"
 	}
 
-	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, api.NewHandler()); err != nil {
-		log.Fatal(err)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	server := api.NewServer(poll.NewMemoryStore(), logger)
+
+	logger.Info("listening", "addr", addr)
+	if err := http.ListenAndServe(addr, server); err != nil {
+		logger.Error("server stopped", "err", err)
+		os.Exit(1)
 	}
 }
