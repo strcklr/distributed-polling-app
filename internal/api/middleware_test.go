@@ -56,8 +56,11 @@ func assertRequestLogged(t *testing.T, buf *bytes.Buffer, method, path string, s
 	entry := lines[0]
 
 	wantLevel := "INFO"
-	if status >= 500 {
+	switch {
+	case status >= 500:
 		wantLevel = "ERROR"
+	case status >= 400:
+		wantLevel = "WARN"
 	}
 	if entry["level"] != wantLevel {
 		t.Errorf("level = %v, want %s for status %d", entry["level"], wantLevel, status)
