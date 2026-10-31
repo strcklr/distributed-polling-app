@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -57,9 +58,22 @@ func (s *Server) handleCreatePoll(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, p)
 }
 
-// TODO(#6): respond 200 with the poll for the {id} path value.
 func (s *Server) handleGetPoll(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	pollID := r.PathValue("id")
+	p, err := s.store.Get(r.Context(), pollID)
+	if err != nil {
+		if errors.Is(err, poll.ErrNotFound) {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("poll %s not found", pollID))
+			return
+		}
+		s.logger.Error("get poll",
+			slog.Any("err", err),
+			slog.String("pollId", pollID),
+		)
+		s.writeError(w, http.StatusInternalServerError, "error fetching poll")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, p)
 }
 
 // TODO(#7): decode castVoteRequest and cast the vote through Store.CastVote only.
