@@ -85,6 +85,22 @@ func TestLogRequestsRecordsStatus(t *testing.T) {
 			handler:    func(w http.ResponseWriter, r *http.Request) {},
 			wantStatus: http.StatusOK,
 		},
+		{
+			name: "WriteHeader after Write keeps the implicit 200",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("hello"))
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "second WriteHeader keeps the first status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantStatus: http.StatusCreated,
+		},
 	}
 
 	for _, tt := range tests {
