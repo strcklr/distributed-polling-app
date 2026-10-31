@@ -125,8 +125,8 @@ func TestGetPollNotFound(t *testing.T) {
 	assertErrorResponse(t, recorder, http.StatusNotFound)
 }
 
-func TestStoreErrorsReturn500(t *testing.T) {
-	tests := []struct {
+func TestStoreErrors(t *testing.T) {
+	endpoints := []struct {
 		name   string
 		method string
 		path   string
@@ -134,27 +134,44 @@ func TestStoreErrorsReturn500(t *testing.T) {
 	}{
 		{name: "create poll", method: http.MethodPost, path: "/polls", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
 		{name: "get poll", method: http.MethodGet, path: "/polls/abc"},
+		{name: "cast vote", method: http.MethodPost, path: "/polls/abc/votes", body: `{"participant": "alice", "option": 0}`},
+	}
+	storeErrors := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantLogged bool
+	}{
+		{name: "unexpected error", err: errors.New("store is down"), wantStatus: http.StatusInternalServerError, wantLogged: true},
+		{name: "wrapped sentinel", err: fmt.Errorf("conditional check failed: %w", poll.ErrClosed), wantStatus: http.StatusConflict},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			storeErr := errors.New("store is down")
-			var buf bytes.Buffer
-			s := NewServer(failingStore{err: storeErr}, slog.New(slog.NewJSONHandler(&buf, nil)))
+	for _, e := range endpoints {
+		for _, se := range storeErrors {
+			t.Run(e.name+"/"+se.name, func(t *testing.T) {
+				var buf bytes.Buffer
+				s := NewServer(failingStore{err: se.err}, slog.New(slog.NewJSONHandler(&buf, nil)))
 
-			recorder := doRequest(t, s, tt.method, tt.path, tt.body)
+				recorder := doRequest(t, s, e.method, e.path, e.body)
 
-			assertErrorResponse(t, recorder, http.StatusInternalServerError)
-			if body := recorder.Body.String(); strings.Contains(body, storeErr.Error()) {
-				t.Errorf("response %q leaks the internal error", body)
-			}
-			logged := slices.ContainsFunc(logLines(t, &buf), func(entry map[string]any) bool {
-				return entry["level"] == "ERROR" && entry["err"] == storeErr.Error()
+				assertErrorResponse(t, recorder, se.wantStatus)
+				errorLines := slices.DeleteFunc(logLines(t, &buf), func(entry map[string]any) bool {
+					return entry["level"] != "ERROR" || entry["msg"] == "request"
+				})
+				if !se.wantLogged {
+					if len(errorLines) != 0 {
+						t.Errorf("client error was logged at ERROR: %v", errorLines)
+					}
+					return
+				}
+				if body := recorder.Body.String(); strings.Contains(body, se.err.Error()) {
+					t.Errorf("response %q leaks the internal error", body)
+				}
+				if len(errorLines) != 1 || errorLines[0]["err"] != se.err.Error() || errorLines[0]["pollID"] == nil {
+					t.Errorf("want one ERROR line with err and pollID, got %v", errorLines)
+				}
 			})
-			if !logged {
-				t.Errorf("store error was not logged at ERROR: %v", logLines(t, &buf))
-			}
-		})
+		}
 	}
 }
 
