@@ -117,7 +117,19 @@ func (s *Store) Get(ctx context.Context, id string) (poll.Poll, error) {
 	return it.toPoll(), nil
 }
 
-// TODO(#10): one conditional UpdateItem per vote, then the conditional close (#11).
+// TODO(#10): implement as one conditional UpdateItem, following the ADR's
+// "Casting a vote" section. Things checked against DynamoDB Local:
+//   - Reject option < 0 before building the request: counts[-1] isn't valid
+//     expression syntax, so it would fail as a ValidationException.
+//   - Without the size(options) > :option condition, ADD counts[5] appends to
+//     the list instead of failing.
+//   - On failure, errors.AsType[*types.ConditionalCheckFailedException] gives
+//     the old item in its Item field (nil when the poll doesn't exist).
+//
+// The ADR reports a poll as CLOSED once votesCast equals the number of
+// participants. Putting that rule in toPoll makes Get, CastVote and the
+// failure classification agree, and the close tests pass before #11 writes
+// the stored status.
 func (s *Store) CastVote(ctx context.Context, pollID, participant string, option int) (poll.Poll, error) {
 	return poll.Poll{}, errors.New("not implemented")
 }
