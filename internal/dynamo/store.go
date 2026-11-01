@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/strcklr/distributed-polling-app/internal/poll"
 )
@@ -24,14 +27,94 @@ func NewStore(client *dynamodb.Client, table string) *Store {
 	return &Store{client: client, table: table}
 }
 
-// TODO(#9): PutItem the poll, failing with poll.ErrAlreadyExists if the ID is taken.
-func (s *Store) Create(ctx context.Context, p poll.Poll) error {
-	return errors.New("not implemented")
+// pollItem represents a DynamoDB item
+type pollItem struct {
+	ID           string         `dynamodbav:"id"`
+	Question     string         `dynamodbav:"question"`
+	Options      []string       `dynamodbav:"options"`
+	Participants []string       `dynamodbav:"participants"`
+	Status       string         `dynamodbav:"status"`
+	Votes        map[string]int `dynamodbav:"votes"`
+	Counts       []int          `dynamodbav:"counts"`
+	VotesCast    int            `dynamodbav:"votesCast"`
 }
 
-// TODO(#9): GetItem with a consistent read, or poll.ErrNotFound.
+func toItem(p poll.Poll) pollItem {
+	votes := p.Votes
+	if votes == nil {
+		votes = map[string]int{}
+	}
+
+	return pollItem{
+		ID:           p.ID,
+		Question:     p.Question,
+		Options:      p.Options,
+		Participants: p.Participants,
+		Status:       string(p.Status),
+		Votes:        votes,
+		Counts:       p.Counts,
+		VotesCast:    len(votes),
+	}
+}
+
+func (it pollItem) toPoll() poll.Poll {
+	return poll.Poll{
+		ID:           it.ID,
+		Question:     it.Question,
+		Options:      it.Options,
+		Participants: it.Participants,
+		Status:       poll.Status(it.Status),
+		Votes:        it.Votes,
+		Counts:       it.Counts,
+	}
+}
+
+func (s *Store) Create(ctx context.Context, p poll.Poll) error {
+	it := toItem(p)
+
+	av, err := attributevalue.MarshalMap(it)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName:           aws.String(s.table),
+		Item:                av,
+		ConditionExpression: aws.String("attribute_not_exists(id)"),
+	})
+	if err != nil {
+		if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
+			return poll.ErrAlreadyExists
+		}
+	}
+
+	return err
+}
+
 func (s *Store) Get(ctx context.Context, id string) (poll.Poll, error) {
-	return poll.Poll{}, errors.New("not implemented")
+	key := map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: id}}
+
+	result, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName:      aws.String(s.table),
+		Key:            key,
+		ConsistentRead: aws.Bool(true),
+	})
+
+	if err != nil {
+		return poll.Poll{}, err
+	}
+
+	if result.Item == nil {
+		return poll.Poll{}, poll.ErrNotFound
+	}
+
+	var it pollItem
+	err = attributevalue.UnmarshalMap(result.Item, &it)
+	if err != nil {
+		return poll.Poll{}, err
+	}
+
+	return it.toPoll(), nil
 }
 
 // TODO(#10): one conditional UpdateItem per vote, then the conditional close (#11).
