@@ -5,6 +5,8 @@ package dynamo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -58,12 +60,17 @@ func toItem(p poll.Poll) pollItem {
 }
 
 func (it pollItem) toPoll() poll.Poll {
+	status := poll.Status(it.Status)
+	if it.VotesCast >= len(it.Participants) {
+		status = poll.StatusClosed
+	}
+
 	return poll.Poll{
 		ID:           it.ID,
 		Question:     it.Question,
 		Options:      it.Options,
 		Participants: it.Participants,
-		Status:       poll.Status(it.Status),
+		Status:       status,
 		Votes:        it.Votes,
 		Counts:       it.Counts,
 	}
@@ -117,19 +124,63 @@ func (s *Store) Get(ctx context.Context, id string) (poll.Poll, error) {
 	return it.toPoll(), nil
 }
 
-// TODO(#10): implement as one conditional UpdateItem, following the ADR's
-// "Casting a vote" section. Things checked against DynamoDB Local:
-//   - Reject option < 0 before building the request: counts[-1] isn't valid
-//     expression syntax, so it would fail as a ValidationException.
-//   - Without the size(options) > :option condition, ADD counts[5] appends to
-//     the list instead of failing.
-//   - On failure, errors.AsType[*types.ConditionalCheckFailedException] gives
-//     the old item in its Item field (nil when the poll doesn't exist).
-//
-// The ADR reports a poll as CLOSED once votesCast equals the number of
-// participants. Putting that rule in toPoll makes Get, CastVote and the
-// failure classification agree, and the close tests pass before #11 writes
-// the stored status.
 func (s *Store) CastVote(ctx context.Context, pollID, participant string, option int) (poll.Poll, error) {
-	return poll.Poll{}, errors.New("not implemented")
+	if option < 0 {
+		return poll.Poll{}, poll.ErrInvalidOption
+	}
+
+	out, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.table),
+		Key:       map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: pollID}},
+		UpdateExpression: aws.String(fmt.Sprintf(
+			"SET votes.#p = :option, counts[%[1]d] = counts[%[1]d] + :one, votesCast = votesCast + :one",
+			option,
+		)),
+		ConditionExpression: aws.String(`
+			attribute_exists(id)
+			AND #status = :open
+			AND contains(participants, :participant)
+			AND size(options) > :option
+			AND attribute_not_exists(votes.#p)
+		`),
+		ExpressionAttributeNames: map[string]string{
+			"#p":      participant,
+			"#status": "status",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":one":         &types.AttributeValueMemberN{Value: "1"},
+			":open":        &types.AttributeValueMemberS{Value: string(poll.StatusOpen)},
+			":participant": &types.AttributeValueMemberS{Value: participant},
+			":option":      &types.AttributeValueMemberN{Value: strconv.Itoa(option)},
+		},
+		ReturnValues:                        types.ReturnValueAllNew,
+		ReturnValuesOnConditionCheckFailure: types.ReturnValuesOnConditionCheckFailureAllOld,
+	})
+	if err != nil {
+		if ccf, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
+			if ccf.Item == nil {
+				return poll.Poll{}, poll.ErrNotFound
+			}
+
+			var old pollItem
+			if e := attributevalue.UnmarshalMap(ccf.Item, &old); e != nil {
+				return poll.Poll{}, e
+			}
+
+			p := old.toPoll()
+			if err := p.Vote(participant, option); err != nil {
+				return poll.Poll{}, err
+			}
+			return poll.Poll{}, fmt.Errorf("vote by %s on poll %s failed its condition but passes Poll.Vote", participant, pollID)
+		}
+		return poll.Poll{}, err
+	}
+
+	var it pollItem
+	err = attributevalue.UnmarshalMap(out.Attributes, &it)
+	if err != nil {
+		return poll.Poll{}, err
+	}
+
+	return it.toPoll(), nil
 }
