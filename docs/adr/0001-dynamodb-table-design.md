@@ -63,7 +63,8 @@ ReturnValues:                        ALL_NEW
 ReturnValuesOnConditionCheckFailure: ALL_OLD
 ```
 
-- The condition only involves this participant's entry. Different voters don't conflict, so concurrent votes all succeed on the first attempt.
+- The update never sends computed values for shared fields. `ADD` increments are applied by DynamoDB against the current value, and writes to one item are applied one at a time, so concurrent votes can't overwrite each other's counts.
+- The condition only checks this participant's entry and attributes no other voter changes. The exception is `status`, which should reject votes that arrive after the close. Concurrent votes therefore don't fail each other's conditions and need no retries. They still queue on the item's write throughput.
 - The participant name always goes through `ExpressionAttributeNames` (`#p`), because names can contain dots, spaces or reserved words.
 - A list index can't be an expression placeholder. `counts[<option>]` is written into the expression as an integer literal, which is safe because `option` is an `int` and the condition checks its range.
 - When the condition fails, `ALL_OLD` returns the item as it was, and the store works out which rule was broken, in the same order as `Poll.Vote`:
@@ -83,6 +84,13 @@ ConditionExpression: #status = :open
 ```
 
 If that condition fails, the poll is already closed. The store treats that as success, so the close is safe to retry.
+
+The close condition is what guarantees correctness: however many callers send the close, the status changes once and exactly one request succeeds. M3's "poll closed" outbox entry joins that write, so only the winner records it. `ALL_NEW` makes sure the right caller sends the close at all:
+
+- **No stale reads.** `ALL_NEW` is the item as this write left it, captured as part of the write. A separate `GetItem` is eventually consistent by default. A stale read could show the last voter `votesCast` below the participant count, and then nobody would close the poll.
+- **One round trip** instead of a write followed by a strongly consistent read.
+- **One close request.** Exactly one vote's `ALL_NEW` shows the full count. With separate reads, several voters near the end could each see it and send close requests that lose.
+- **A predictable result.** `CastVote` returns the poll as this vote left it, without later votes mixed in.
 
 ### A crash between the vote and the close
 
