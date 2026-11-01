@@ -70,3 +70,7 @@ func newTestStore(t *testing.T) poll.Store {
 func TestStoreCreateGet(t *testing.T) {
 	storetest.RunCreateGet(t, newTestStore)
 }
+
+func TestStoreCastVote(t *testing.T) {
+	storetest.RunCastVote(t, newTestStore)
+}
