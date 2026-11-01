@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -182,15 +183,33 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 		return poll.Poll{}, err
 	}
 
+	if it.VotesCast >= len(it.Participants) {
+		if err := s.closePoll(context.WithoutCancel(ctx), it.ID); err != nil {
+			slog.ErrorContext(ctx, "closing poll after last vote", slog.Any("err", err), slog.String("pollID", it.ID))
+		}
+	}
+
 	return it.toPoll(), nil
 }
 
-// TODO(#11): implement following the ADR's "Closing" section, and call it from
-// CastVote when the ALL_NEW item's votesCast reaches the number of
-// participants. A failed condition means the poll is already closed, so
-// return nil. Decide what CastVote does if the close fails for another
-// reason: the vote is already recorded, and the ADR's crash section covers a
-// poll left OPEN.
 func (s *Store) closePoll(ctx context.Context, pollID string) error {
-	return errors.New("not implemented")
+	if _, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:           aws.String(s.table),
+		Key:                 map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: pollID}},
+		UpdateExpression:    aws.String("SET #status = :closed"),
+		ConditionExpression: aws.String("#status = :open"),
+		ExpressionAttributeNames: map[string]string{
+			"#status": "status",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":open":   &types.AttributeValueMemberS{Value: string(poll.StatusOpen)},
+			":closed": &types.AttributeValueMemberS{Value: string(poll.StatusClosed)},
+		},
+	}); err != nil {
+		if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); !ok {
+			return fmt.Errorf("unknown error closing poll %s: %w", pollID, err)
+		}
+	}
+
+	return nil
 }
