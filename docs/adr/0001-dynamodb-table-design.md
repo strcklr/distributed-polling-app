@@ -52,8 +52,9 @@ All of a poll's invariants involve the poll and its votes together. Keeping them
 ### Casting a vote: one conditional update per voter
 
 ```
-UpdateExpression:    SET votes.#p = :option
-                     ADD counts[<option>] :one, votesCast :one
+UpdateExpression:    SET votes.#p = :option,
+                         counts[<option>] = counts[<option>] + :one,
+                         votesCast = votesCast + :one
 ConditionExpression: attribute_exists(id)
                      AND #status = :open
                      AND contains(participants, :participant)
@@ -63,10 +64,11 @@ ReturnValues:                        ALL_NEW
 ReturnValuesOnConditionCheckFailure: ALL_OLD
 ```
 
-- The update never sends computed values for shared fields. `ADD` increments are applied by DynamoDB against the current value, and writes to one item are applied one at a time, so concurrent votes can't overwrite each other's counts.
+- The update never sends computed values for shared fields. `x = x + :one` is evaluated by DynamoDB against the current value, and writes to one item are applied one at a time, so concurrent votes can't overwrite each other's counts.
+- Increments use `SET` rather than `ADD`. AWS documents `ADD` for Number and set attributes but never shows it on a list element, while `SET path = path + :value` is in the documented grammar. Unlike `ADD`, it also fails instead of starting from 0 if a counter is missing.
 - The condition only checks this participant's entry and attributes no other voter changes. The exception is `status`, which should reject votes that arrive after the close. Concurrent votes therefore don't fail each other's conditions and need no retries. They still queue on the item's write throughput.
 - The participant name always goes through `ExpressionAttributeNames` (`#p`), because names can contain dots, spaces or reserved words.
-- A list index can't be an expression placeholder. `counts[<option>]` is written into the expression as an integer literal, which is safe because `option` is an `int` and the condition checks its range.
+- A list index can't be an expression placeholder. `counts[<option>]` is written into the expression as an integer literal, which is safe because `option` is an `int`. The store rejects a negative option before sending, since `counts[-1]` isn't valid syntax. The condition's range check is essential: `SET` on an index past the end of a list appends a new element instead of failing.
 - When the condition fails, `ALL_OLD` returns the item as it was, and the store works out which rule was broken, in the same order as `Poll.Vote`:
   - no item: `ErrNotFound`
   - `status` is `CLOSED`: `ErrClosed`
