@@ -7,11 +7,8 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -28,16 +25,11 @@ func newLocalClient(t *testing.T) *dynamodb.Client {
 	if endpoint == "" {
 		t.Skip("DYNAMODB_ENDPOINT not set; run `docker compose up -d` and set it to http://localhost:8000")
 	}
-	cfg, err := config.LoadDefaultConfig(t.Context(),
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("local", "local", "")),
-	)
+	client, err := NewClient(t.Context(), endpoint)
 	if err != nil {
-		t.Fatalf("load AWS config: %v", err)
+		t.Fatal(err)
 	}
-	return dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
-		o.BaseEndpoint = aws.String(endpoint)
-	})
+	return client
 }
 
 func newTestStore(t *testing.T) poll.Store {
@@ -51,14 +43,8 @@ func newStore(t *testing.T) *Store {
 	client := newLocalClient(t)
 	table := "polls-test-" + rand.Text()
 
-	_, err := client.CreateTable(t.Context(), &dynamodb.CreateTableInput{
-		TableName:            aws.String(table),
-		AttributeDefinitions: []types.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: types.ScalarAttributeTypeS}},
-		KeySchema:            []types.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: types.KeyTypeHash}},
-		BillingMode:          types.BillingModePayPerRequest,
-	})
-	if err != nil {
-		t.Fatalf("create table %s: %v", table, err)
+	if err := CreateTable(t.Context(), client, table); err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		// t.Context() is already canceled when cleanup runs.
@@ -66,10 +52,6 @@ func newStore(t *testing.T) *Store {
 			t.Errorf("delete table %s: %v", table, err)
 		}
 	})
-	waiter := dynamodb.NewTableExistsWaiter(client)
-	if err := waiter.Wait(t.Context(), &dynamodb.DescribeTableInput{TableName: aws.String(table)}, time.Minute); err != nil {
-		t.Fatalf("wait for table %s: %v", table, err)
-	}
 
 	return NewStore(client, table)
 }
