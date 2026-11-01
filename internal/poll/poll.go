@@ -21,6 +21,7 @@ const (
 var (
 	ErrInvalidPoll    = errors.New("invalid poll")
 	ErrNotFound       = errors.New("poll not found")
+	ErrAlreadyExists  = errors.New("poll already exists")
 	ErrClosed         = errors.New("poll is closed")
 	ErrNotParticipant = errors.New("not a participant")
 	ErrAlreadyVoted   = errors.New("participant already voted")
@@ -37,7 +38,9 @@ type Poll struct {
 	Status       Status   `json:"status"`
 	Counts       []int    `json:"counts"`
 
-	votes map[string]int
+	// Votes maps each participant who has voted to the option they chose.
+	// It's kept out of API responses so votes stay private.
+	Votes map[string]int `json:"-"`
 }
 
 // New validates the input and returns an open poll with no votes.
@@ -63,7 +66,7 @@ func New(question string, options, participants []string) (Poll, error) {
 		Participants: slices.Clone(participants),
 		Status:       StatusOpen,
 		Counts:       make([]int, len(options)),
-		votes:        make(map[string]int),
+		Votes:        make(map[string]int),
 	}, nil
 }
 
@@ -78,13 +81,13 @@ func (p *Poll) Vote(participant string, option int) error {
 	case option < 0 || option >= len(p.Options):
 		return ErrInvalidOption
 	}
-	if _, voted := p.votes[participant]; voted {
+	if _, voted := p.Votes[participant]; voted {
 		return ErrAlreadyVoted
 	}
 
-	p.votes[participant] = option
+	p.Votes[participant] = option
 	p.Counts[option]++
-	if len(p.votes) == len(p.Participants) {
+	if len(p.Votes) == len(p.Participants) {
 		p.Status = StatusClosed
 	}
 	return nil
@@ -94,7 +97,7 @@ func (p Poll) clone() Poll {
 	p.Options = slices.Clone(p.Options)
 	p.Participants = slices.Clone(p.Participants)
 	p.Counts = slices.Clone(p.Counts)
-	p.votes = maps.Clone(p.votes)
+	p.Votes = maps.Clone(p.Votes)
 	return p
 }
 

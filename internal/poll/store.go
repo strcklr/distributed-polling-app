@@ -31,6 +31,10 @@ func (s *MemoryStore) Create(ctx context.Context, p Poll) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if _, ok := s.polls[p.ID]; ok {
+		return ErrAlreadyExists
+	}
+
 	stored := p.clone()
 	s.polls[p.ID] = &stored
 	return nil

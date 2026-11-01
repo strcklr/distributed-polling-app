@@ -5,6 +5,7 @@ A polling service in Go, built to stay correct under failure: conditional state 
 ## Requirements
 
 - Go 1.27+
+- Docker, for the DynamoDB store's tests
 
 ## Setup
 
@@ -38,6 +39,15 @@ go test ./...
 ```
 
 Useful flags: `-v` for each test's name and output, `-run TestHealth` to run only the matching tests, and `-race` to run with the race detector. `-race` needs cgo, so on Windows it also needs a C compiler such as MinGW-w64 and `CGO_ENABLED=1`. On Linux and macOS it works out of the box.
+
+The DynamoDB store's tests are skipped unless `DYNAMODB_ENDPOINT` is set. To run them against DynamoDB Local:
+
+```bash
+docker compose up -d
+DYNAMODB_ENDPOINT=http://localhost:8000 go test ./...
+```
+
+On PowerShell, set the variable first with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`. Each test creates its own table and deletes it afterwards. CI runs these tests against a DynamoDB Local service container.
 
 Before committing:
 
@@ -79,3 +89,7 @@ On Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. Type `cur
 |---|---|
 | `cmd/api` | Entry point for the HTTP server |
 | `internal/api` | HTTP handlers and routing |
+| `internal/poll` | Poll model, voting rules, `Store` interface and in-memory store |
+| `internal/poll/storetest` | Test suite every `Store` implementation must pass |
+| `internal/dynamo` | DynamoDB-backed `Store` |
+| `docs/adr` | Architecture decision records |

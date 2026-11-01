@@ -45,7 +45,7 @@ All of a poll's invariants involve the poll and its votes together. Keeping them
 | # | Operation |
 |---|---|
 | 1 | `PutItem` with `attribute_not_exists(id)`, so an ID collision fails instead of overwriting. |
-| 2 | `GetItem` with `ConsistentRead: true`, so a client sees its own vote immediately. Counts are stored on the item, so nothing else needs reading. |
+| 2 | `GetItem` with `ConsistentRead: true`. An eventually consistent read could return 404 for a poll whose `201` was just sent, or hide a confirmed vote when a client refreshes. Reads cost twice as much this way, which is negligible for items this small. Counts are stored on the item, so nothing else needs reading. |
 | 3, 4 | One `UpdateItem`, described below. |
 | 5 | A second, conditional `UpdateItem`, described below. |
 
