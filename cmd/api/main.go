@@ -19,9 +19,9 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	table := os.Getenv("POLLS_TABLE")
-	if table == "" {
-		logger.Error("POLLS_TABLE not set")
+	table, outbox := os.Getenv("POLLS_TABLE"), os.Getenv("OUTBOX_TABLE")
+	if table == "" || outbox == "" {
+		logger.Error("POLLS_TABLE and OUTBOX_TABLE must be set")
 		os.Exit(1)
 	}
 
@@ -32,14 +32,16 @@ func main() {
 		logger.Error("connecting to DynamoDB", "err", err)
 		os.Exit(1)
 	}
-	if err := dynamo.CheckTable(ctx, client, table); err != nil {
-		logger.Error("checking polls table", "err", err)
-		os.Exit(1)
+	for _, t := range []string{table, outbox} {
+		if err := dynamo.CheckTable(ctx, client, t); err != nil {
+			logger.Error("checking table", "err", err)
+			os.Exit(1)
+		}
 	}
 
-	server := api.NewServer(dynamo.NewStore(client, table), logger)
+	server := api.NewServer(dynamo.NewStore(client, table, outbox), logger)
 
-	logger.Info("listening", "addr", addr, "table", table)
+	logger.Info("listening", "addr", addr, "table", table, "outbox", outbox)
 	if err := http.ListenAndServe(addr, server); err != nil {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)

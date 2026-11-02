@@ -1,5 +1,6 @@
-// Command createtable creates the polls table named by $POLLS_TABLE, for
-// local development against DynamoDB Local at $DYNAMODB_ENDPOINT.
+// Command createtable creates the polls table named by $POLLS_TABLE and the
+// outbox table named by $OUTBOX_TABLE, for local development against
+// DynamoDB Local at $DYNAMODB_ENDPOINT.
 package main
 
 import (
@@ -14,9 +15,9 @@ import (
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	table := os.Getenv("POLLS_TABLE")
-	if table == "" {
-		logger.Error("POLLS_TABLE not set")
+	table, outbox := os.Getenv("POLLS_TABLE"), os.Getenv("OUTBOX_TABLE")
+	if table == "" || outbox == "" {
+		logger.Error("POLLS_TABLE and OUTBOX_TABLE must be set")
 		os.Exit(1)
 	}
 
@@ -31,5 +32,9 @@ func main() {
 		logger.Error("creating polls table", "err", err)
 		os.Exit(1)
 	}
-	logger.Info("table ready", "table", table)
+	if err := dynamo.CreateOutboxTable(ctx, client, outbox); err != nil {
+		logger.Error("creating outbox table", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("tables ready", "table", table, "outbox", outbox)
 }

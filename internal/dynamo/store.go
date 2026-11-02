@@ -1,5 +1,6 @@
 // Package dynamo stores polls in DynamoDB, following the table design in
-// docs/adr/0001-dynamodb-table-design.md.
+// docs/adr/0001-dynamodb-table-design.md and the outbox in
+// docs/adr/0002-outbox.md.
 package dynamo
 
 import (
@@ -19,15 +20,18 @@ import (
 
 var _ poll.Store = (*Store)(nil)
 
-// Store is a poll.Store backed by a DynamoDB table.
+// Store is a poll.Store backed by DynamoDB. It writes poll events to an
+// outbox table in the same transaction as the change they record.
 type Store struct {
 	client *dynamodb.Client
 	table  string
+	outbox string
 }
 
-// NewStore returns a Store that reads and writes polls in table.
-func NewStore(client *dynamodb.Client, table string) *Store {
-	return &Store{client: client, table: table}
+// NewStore returns a Store that keeps polls in table and their events in
+// outbox.
+func NewStore(client *dynamodb.Client, table, outbox string) *Store {
+	return &Store{client: client, table: table, outbox: outbox}
 }
 
 // pollItem represents a DynamoDB item
@@ -77,6 +81,10 @@ func (it pollItem) toPoll() poll.Poll {
 	}
 }
 
+// TODO(#13): write the poll and its POLL_CREATED event in one
+// TransactWriteItems call, following ADR 0002's "Writes" section. A failed
+// condition now arrives as *types.TransactionCanceledException; check the
+// poll item's CancellationReasons entry for "ConditionalCheckFailed".
 func (s *Store) Create(ctx context.Context, p poll.Poll) error {
 	it := toItem(p)
 
@@ -184,7 +192,7 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 	}
 
 	if it.VotesCast >= len(it.Participants) {
-		if err := s.closePoll(context.WithoutCancel(ctx), it.ID); err != nil {
+		if err := s.closePoll(context.WithoutCancel(ctx), it); err != nil {
 			slog.ErrorContext(ctx, "closing poll after last vote", slog.Any("err", err), slog.String("pollID", it.ID))
 		}
 	}
@@ -192,7 +200,14 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 	return it.toPoll(), nil
 }
 
-func (s *Store) closePoll(ctx context.Context, pollID string) error {
+// TODO(#13): make this one TransactWriteItems call that also writes the
+// POLL_CLOSED event, using it.Counts as the final counts. Then add read
+// repair (ADR 0002's crash section): Get, and CastVote when its condition
+// fails, close a poll whose every participant has voted but whose stored
+// status is still OPEN. Do the repair before returning, so a read that
+// returns CLOSED has stored it.
+func (s *Store) closePoll(ctx context.Context, it pollItem) error {
+	pollID := it.ID
 	if _, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName:           aws.String(s.table),
 		Key:                 map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: pollID}},
