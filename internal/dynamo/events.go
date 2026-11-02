@@ -1,8 +1,10 @@
 package dynamo
 
+import "github.com/strcklr/distributed-polling-app/internal/outbox"
+
 const (
-	eventPollCreated = "POLL_CREATED"
-	eventPollClosed  = "POLL_CLOSED"
+	eventPollCreated = string(outbox.EventPollCreated)
+	eventPollClosed  = string(outbox.EventPollClosed)
 
 	pendingIndex = "pending-index"
 	// pendingValue marks an undelivered event. Every pending event shares it,
@@ -10,8 +12,7 @@ const (
 	pendingValue = "1"
 )
 
-// eventItem is an outbox item, following the schema in ADR 0002. The worker's
-// lease attributes come with #14.
+// eventItem is an outbox item, following the schema in ADR 0002.
 type eventItem struct {
 	EventID    string       `dynamodbav:"eventId"`
 	Type       string       `dynamodbav:"type"`
@@ -19,6 +20,9 @@ type eventItem struct {
 	OccurredAt string       `dynamodbav:"occurredAt"`
 	Payload    eventPayload `dynamodbav:"payload"`
 	Pending    string       `dynamodbav:"pending,omitempty"`
+	// LeaseUntil is when the current claim expires, in Unix milliseconds.
+	LeaseUntil int64  `dynamodbav:"leaseUntil,omitempty"`
+	ClaimedBy  string `dynamodbav:"claimedBy,omitempty"`
 }
 
 // eventPayload is the snapshot an email needs, taken when the event is

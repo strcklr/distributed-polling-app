@@ -47,7 +47,8 @@ Table `Outbox`, partition key `eventId` (string):
 | `occurredAt` | S | RFC 3339 timestamp |
 | `payload` | M | The snapshot described above |
 | `pending` | S | Set to `"1"` when written; removed once delivered |
-| `leaseUntil`, `claimedBy` | S | Set while a worker owns the event |
+| `leaseUntil` | N | When the current claim expires, in Unix milliseconds |
+| `claimedBy` | S | The worker that holds the claim |
 
 A global secondary index `pending-index` (partition key `pending`, sort key `occurredAt`) lists undelivered events oldest first. It's a sparse index: an item without a `pending` attribute isn't in it, so removing `pending` takes a delivered event out of the index, like a partial index on `WHERE NOT processed` in Postgres. Delivered events stay in the table as a record.
 
