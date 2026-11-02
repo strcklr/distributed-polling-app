@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -66,7 +67,7 @@ func toItem(p poll.Poll) pollItem {
 
 func (it pollItem) toPoll() poll.Poll {
 	status := poll.Status(it.Status)
-	if it.VotesCast >= len(it.Participants) {
+	if it.VotesCast == len(it.Participants) {
 		status = poll.StatusClosed
 	}
 
@@ -81,30 +82,85 @@ func (it pollItem) toPoll() poll.Poll {
 	}
 }
 
-// TODO(#13): write the poll and its POLL_CREATED event in one
-// TransactWriteItems call, following ADR 0002's "Writes" section. A failed
-// condition now arrives as *types.TransactionCanceledException; check the
-// poll item's CancellationReasons entry for "ConditionalCheckFailed".
+func (it pollItem) needsRepair() bool {
+	return poll.Status(it.Status) == poll.StatusOpen && it.VotesCast == len(it.Participants)
+}
+
+func (it pollItem) toEvent(eventType string) eventItem {
+	var eventID string
+	var counts []int
+	switch eventType {
+	case eventPollCreated:
+		eventID = it.ID + "#created"
+	case eventPollClosed:
+		eventID = it.ID + "#closed"
+		counts = it.Counts
+	}
+
+	payload := eventPayload{
+		Question:   it.Question,
+		Options:    it.Options,
+		Recipients: it.Participants,
+		Counts:     counts,
+	}
+
+	return eventItem{
+		EventID:    eventID,
+		Type:       eventType,
+		PollID:     it.ID,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339),
+		Payload:    payload,
+		Pending:    pendingValue,
+	}
+}
+
+func marshalError(msg string, pollID string, err error) error {
+	return fmt.Errorf("marshal %s for poll %s: %w", msg, pollID, err)
+}
+
 func (s *Store) Create(ctx context.Context, p poll.Poll) error {
 	it := toItem(p)
 
 	av, err := attributevalue.MarshalMap(it)
 	if err != nil {
-		return err
+		return marshalError("poll item", it.ID, err)
 	}
 
-	_, err = s.client.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName:           aws.String(s.table),
-		Item:                av,
-		ConditionExpression: aws.String("attribute_not_exists(id)"),
-	})
+	event := it.toEvent(eventPollCreated)
+	eav, err := attributevalue.MarshalMap(event)
 	if err != nil {
-		if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
-			return poll.ErrAlreadyExists
-		}
+		return marshalError("create event", it.ID, err)
 	}
 
-	return err
+	if _, err = s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Put: &types.Put{
+					TableName:           aws.String(s.table),
+					Item:                av,
+					ConditionExpression: aws.String("attribute_not_exists(id)"),
+				},
+			},
+			{
+				Put: &types.Put{
+					TableName:           aws.String(s.outbox),
+					Item:                eav,
+					ConditionExpression: aws.String("attribute_not_exists(eventId)"),
+				},
+			},
+		},
+	}); err != nil {
+		if tce, ok := errors.AsType[*types.TransactionCanceledException](err); ok {
+			if len(tce.CancellationReasons) > 0 &&
+				aws.ToString(tce.CancellationReasons[0].Code) == "ConditionalCheckFailed" {
+				return poll.ErrAlreadyExists
+			}
+		}
+
+		return fmt.Errorf("create poll %s: %w", it.ID, err)
+	}
+
+	return nil
 }
 
 func (s *Store) Get(ctx context.Context, id string) (poll.Poll, error) {
@@ -128,6 +184,12 @@ func (s *Store) Get(ctx context.Context, id string) (poll.Poll, error) {
 	err = attributevalue.UnmarshalMap(result.Item, &it)
 	if err != nil {
 		return poll.Poll{}, err
+	}
+
+	if it.needsRepair() {
+		if err := s.closePoll(context.WithoutCancel(ctx), it); err != nil {
+			slog.ErrorContext(ctx, "repairing poll", slog.Any("err", err), slog.String("pollID", it.ID))
+		}
 	}
 
 	return it.toPoll(), nil
@@ -178,6 +240,11 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 
 			p := old.toPoll()
 			if err := p.Vote(participant, option); err != nil {
+				if errors.Is(err, poll.ErrClosed) && old.needsRepair() {
+					if err := s.closePoll(context.WithoutCancel(ctx), old); err != nil {
+						slog.ErrorContext(ctx, "repairing poll", slog.Any("err", err), slog.String("pollID", old.ID))
+					}
+				}
 				return poll.Poll{}, err
 			}
 			return poll.Poll{}, fmt.Errorf("vote by %s on poll %s failed its condition but passes Poll.Vote", participant, pollID)
@@ -200,30 +267,47 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 	return it.toPoll(), nil
 }
 
-// TODO(#13): make this one TransactWriteItems call that also writes the
-// POLL_CLOSED event, using it.Counts as the final counts. Then add read
-// repair (ADR 0002's crash section): Get, and CastVote when its condition
-// fails, close a poll whose every participant has voted but whose stored
-// status is still OPEN. Do the repair before returning, so a read that
-// returns CLOSED has stored it.
 func (s *Store) closePoll(ctx context.Context, it pollItem) error {
-	pollID := it.ID
-	if _, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName:           aws.String(s.table),
-		Key:                 map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: pollID}},
-		UpdateExpression:    aws.String("SET #status = :closed"),
-		ConditionExpression: aws.String("#status = :open"),
-		ExpressionAttributeNames: map[string]string{
-			"#status": "status",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":open":   &types.AttributeValueMemberS{Value: string(poll.StatusOpen)},
-			":closed": &types.AttributeValueMemberS{Value: string(poll.StatusClosed)},
+	event := it.toEvent(eventPollClosed)
+	av, err := attributevalue.MarshalMap(event)
+	if err != nil {
+		return marshalError("close event", it.ID, err)
+	}
+
+	if _, err := s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Update: &types.Update{
+					TableName:           aws.String(s.table),
+					Key:                 map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: it.ID}},
+					UpdateExpression:    aws.String("SET #status = :closed"),
+					ConditionExpression: aws.String("#status = :open"),
+					ExpressionAttributeNames: map[string]string{
+						"#status": "status",
+					},
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":open":   &types.AttributeValueMemberS{Value: string(poll.StatusOpen)},
+						":closed": &types.AttributeValueMemberS{Value: string(poll.StatusClosed)},
+					},
+				},
+			},
+			{
+				Put: &types.Put{
+					TableName:           aws.String(s.outbox),
+					Item:                av,
+					ConditionExpression: aws.String("attribute_not_exists(eventId)"),
+				},
+			},
 		},
 	}); err != nil {
-		if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); !ok {
-			return fmt.Errorf("unknown error closing poll %s: %w", pollID, err)
+		if tce, ok := errors.AsType[*types.TransactionCanceledException](err); ok {
+			if len(tce.CancellationReasons) > 0 &&
+				aws.ToString(tce.CancellationReasons[0].Code) == "ConditionalCheckFailed" {
+				return nil // already closed
+			}
+			return fmt.Errorf("close poll %s: %w", it.ID, err)
 		}
+		return fmt.Errorf("close poll %s: %w", it.ID, err)
 	}
 
 	return nil
