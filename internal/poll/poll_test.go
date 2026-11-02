@@ -8,7 +8,7 @@ import (
 
 func newTestPoll(t *testing.T) Poll {
 	t.Helper()
-	poll, err := New("Lunch Plans", []string{"Tacos", "Pizza", "Gyros"}, []string{"alice", "bob", "billy"})
+	poll, err := New("Lunch Plans", []string{"Tacos", "Pizza", "Gyros"}, []string{"alice@example.com", "bob@example.com", "billy@example.com"})
 	if err != nil {
 		t.Fatalf("error creating poll: %v", err)
 	}
@@ -23,12 +23,12 @@ func TestVote(t *testing.T) {
 		option      int
 		wantErr     error
 	}{
-		{name: "valid vote", participant: "bob", option: 0, wantErr: nil},
-		{name: "invalid option, lower bound", participant: "bob", option: -1, wantErr: ErrInvalidOption},
-		{name: "invalid option, upper bound", participant: "bob", option: 3, wantErr: ErrInvalidOption},
+		{name: "valid vote", participant: "bob@example.com", option: 0, wantErr: nil},
+		{name: "invalid option, lower bound", participant: "bob@example.com", option: -1, wantErr: ErrInvalidOption},
+		{name: "invalid option, upper bound", participant: "bob@example.com", option: 3, wantErr: ErrInvalidOption},
 		{name: "not a participant", participant: "foo", option: 0, wantErr: ErrNotParticipant},
-		{name: "already voted", priorVotes: []string{"bob"}, participant: "bob", option: 0, wantErr: ErrAlreadyVoted},
-		{name: "poll closed", priorVotes: []string{"bob", "alice", "billy"}, participant: "bob", option: 0, wantErr: ErrClosed},
+		{name: "already voted", priorVotes: []string{"bob@example.com"}, participant: "bob@example.com", option: 0, wantErr: ErrAlreadyVoted},
+		{name: "poll closed", priorVotes: []string{"bob@example.com", "alice@example.com", "billy@example.com"}, participant: "bob@example.com", option: 0, wantErr: ErrClosed},
 	}
 
 	for _, tt := range tests {
@@ -53,9 +53,9 @@ func TestVoteClosesPollAfterLastVote(t *testing.T) {
 		participant string
 		option      int
 	}{
-		{participant: "bob", option: 0},
-		{participant: "alice", option: 0},
-		{participant: "billy", option: 1},
+		{participant: "bob@example.com", option: 0},
+		{participant: "alice@example.com", option: 0},
+		{participant: "billy@example.com", option: 1},
 	}
 
 	for i, tt := range votes {
@@ -84,13 +84,13 @@ func TestNew(t *testing.T) {
 		participants []string
 		wantErr      error
 	}{
-		{name: "valid", question: "Lunch?", options: []string{"Tacos", "Pizza"}, participants: []string{"alice"}},
-		{name: "empty question", question: "", options: []string{"Tacos", "Pizza"}, participants: []string{"alice"}, wantErr: ErrInvalidPoll},
-		{name: "blank question", question: "   ", options: []string{"Tacos", "Pizza"}, participants: []string{"alice"}, wantErr: ErrInvalidPoll},
-		{name: "one option", question: "Lunch?", options: []string{"Tacos"}, participants: []string{"alice"}, wantErr: ErrInvalidPoll},
+		{name: "valid", question: "Lunch?", options: []string{"Tacos", "Pizza"}, participants: []string{"alice@example.com"}},
+		{name: "empty question", question: "", options: []string{"Tacos", "Pizza"}, participants: []string{"alice@example.com"}, wantErr: ErrInvalidPoll},
+		{name: "blank question", question: "   ", options: []string{"Tacos", "Pizza"}, participants: []string{"alice@example.com"}, wantErr: ErrInvalidPoll},
+		{name: "one option", question: "Lunch?", options: []string{"Tacos"}, participants: []string{"alice@example.com"}, wantErr: ErrInvalidPoll},
 		{name: "no participants", question: "Lunch?", options: []string{"Tacos", "Pizza"}, wantErr: ErrInvalidPoll},
-		{name: "duplicate options", question: "Lunch?", options: []string{"Tacos", "Tacos"}, participants: []string{"alice"}, wantErr: ErrInvalidPoll},
-		{name: "duplicate participants", question: "Lunch?", options: []string{"Tacos", "Pizza"}, participants: []string{"alice", "alice"}, wantErr: ErrInvalidPoll},
+		{name: "duplicate options", question: "Lunch?", options: []string{"Tacos", "Tacos"}, participants: []string{"alice@example.com"}, wantErr: ErrInvalidPoll},
+		{name: "duplicate participants", question: "Lunch?", options: []string{"Tacos", "Pizza"}, participants: []string{"alice@example.com", "alice@example.com"}, wantErr: ErrInvalidPoll},
 	}
 
 	for _, tt := range tests {
@@ -104,7 +104,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewReturnsOpenPollWithNoVotes(t *testing.T) {
-	p, err := New("  Lunch?  ", []string{"Tacos", "Pizza", "Gyros"}, []string{"alice", "bob"})
+	p, err := New("  Lunch?  ", []string{"Tacos", "Pizza", "Gyros"}, []string{"alice@example.com", "bob@example.com"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -125,19 +125,19 @@ func TestNewReturnsOpenPollWithNoVotes(t *testing.T) {
 
 func TestNewCopiesInputSlices(t *testing.T) {
 	options := []string{"Tacos", "Pizza"}
-	participants := []string{"alice", "bob"}
+	participants := []string{"alice@example.com", "bob@example.com"}
 	p, err := New("Lunch?", options, participants)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	options[0] = "Sushi"
-	participants[0] = "mallory"
+	participants[0] = "mallory@example.com"
 
 	if p.Options[0] != "Tacos" {
 		t.Errorf("Options[0] = %q after caller changed its slice, want %q", p.Options[0], "Tacos")
 	}
-	if p.Participants[0] != "alice" {
-		t.Errorf("Participants[0] = %q after caller changed its slice, want %q", p.Participants[0], "alice")
+	if p.Participants[0] != "alice@example.com" {
+		t.Errorf("Participants[0] = %q after caller changed its slice, want %q", p.Participants[0], "alice@example.com")
 	}
 }

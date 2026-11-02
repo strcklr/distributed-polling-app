@@ -78,9 +78,9 @@ func TestStoreCastVote(t *testing.T) {
 
 func TestStoreLastVoteStoresClosed(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice", "bob", "carol")
+	p := createPoll(t, s, "alice@example.com", "bob@example.com", "carol@example.com")
 
-	for _, participant := range []string{"alice", "bob"} {
+	for _, participant := range []string{"alice@example.com", "bob@example.com"} {
 		if _, err := s.CastVote(t.Context(), p.ID, participant, 0); err != nil {
 			t.Fatalf("CastVote(%s) error = %v", participant, err)
 		}
@@ -89,7 +89,7 @@ func TestStoreLastVoteStoresClosed(t *testing.T) {
 		t.Errorf("stored status before the last vote = %s, want %s", got, poll.StatusOpen)
 	}
 
-	if _, err := s.CastVote(t.Context(), p.ID, "carol", 1); err != nil {
+	if _, err := s.CastVote(t.Context(), p.ID, "carol@example.com", 1); err != nil {
 		t.Fatalf("CastVote(carol) error = %v", err)
 	}
 	if got := storedStatus(t, s, p.ID); got != poll.StatusClosed {
@@ -101,7 +101,7 @@ func TestStoreConcurrentLastVotesStoreClosed(t *testing.T) {
 	const n = 50
 	participants := make([]string, n)
 	for i := range participants {
-		participants[i] = fmt.Sprintf("voter-%d", i)
+		participants[i] = fmt.Sprintf("voter-%d@example.com", i)
 	}
 	s := newStore(t)
 	p := createPoll(t, s, participants...)
@@ -123,7 +123,7 @@ func TestStoreConcurrentLastVotesStoreClosed(t *testing.T) {
 
 func TestStoreClosePollIsIdempotent(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice")
+	p := createPoll(t, s, "alice@example.com")
 
 	for i := range 2 {
 		if err := s.closePoll(t.Context(), toItem(p)); err != nil {

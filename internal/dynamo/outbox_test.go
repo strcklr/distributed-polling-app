@@ -19,7 +19,7 @@ import (
 func TestCreateWritesCreatedEvent(t *testing.T) {
 	s := newStore(t)
 	before := time.Now().UTC().Add(-time.Second)
-	p := createPoll(t, s, "alice", "bob")
+	p := createPoll(t, s, "alice@example.com", "bob@example.com")
 
 	ev := storedEvent(t, s, p.ID+"#created")
 	want := eventItem{
@@ -35,8 +35,8 @@ func TestCreateWritesCreatedEvent(t *testing.T) {
 
 func TestCreateDuplicateWritesNoEvent(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice")
-	duplicate, err := poll.New("Dinner?", []string{"Soup", "Salad"}, []string{"bob"})
+	p := createPoll(t, s, "alice@example.com")
+	duplicate, err := poll.New("Dinner?", []string{"Soup", "Salad"}, []string{"bob@example.com"})
 	if err != nil {
 		t.Fatalf("poll.New() error = %v", err)
 	}
@@ -54,9 +54,9 @@ func TestCreateDuplicateWritesNoEvent(t *testing.T) {
 
 func TestVoteWritesNoEvent(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice", "bob")
+	p := createPoll(t, s, "alice@example.com", "bob@example.com")
 
-	if _, err := s.CastVote(t.Context(), p.ID, "alice", 0); err != nil {
+	if _, err := s.CastVote(t.Context(), p.ID, "alice@example.com", 0); err != nil {
 		t.Fatalf("CastVote() error = %v", err)
 	}
 
@@ -65,10 +65,10 @@ func TestVoteWritesNoEvent(t *testing.T) {
 
 func TestLastVoteWritesClosedEvent(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice", "bob", "carol")
-	castVotes(t, s, p.ID, map[string]int{"alice": 1, "bob": 0})
+	p := createPoll(t, s, "alice@example.com", "bob@example.com", "carol@example.com")
+	castVotes(t, s, p.ID, map[string]int{"alice@example.com": 1, "bob@example.com": 0})
 	before := time.Now().UTC().Add(-time.Second)
-	castVotes(t, s, p.ID, map[string]int{"carol": 1})
+	castVotes(t, s, p.ID, map[string]int{"carol@example.com": 1})
 
 	ev := storedEvent(t, s, p.ID+"#closed")
 	want := eventItem{
@@ -86,7 +86,7 @@ func TestConcurrentLastVotesWriteClosedEvent(t *testing.T) {
 	const n = 50
 	participants := make([]string, n)
 	for i := range participants {
-		participants[i] = fmt.Sprintf("voter-%d", i)
+		participants[i] = fmt.Sprintf("voter-%d@example.com", i)
 	}
 	s := newStore(t)
 	p := createPoll(t, s, participants...)
@@ -129,7 +129,7 @@ func TestCastVoteRepairsFullyVotedOpenPoll(t *testing.T) {
 	s := newStore(t)
 	p := createStuckPoll(t, s)
 
-	if _, err := s.CastVote(t.Context(), p.ID, "alice", 0); !errors.Is(err, poll.ErrClosed) {
+	if _, err := s.CastVote(t.Context(), p.ID, "alice@example.com", 0); !errors.Is(err, poll.ErrClosed) {
 		t.Errorf("CastVote() error = %v, want %v", err, poll.ErrClosed)
 	}
 	assertRepaired(t, s, p)
@@ -137,8 +137,8 @@ func TestCastVoteRepairsFullyVotedOpenPoll(t *testing.T) {
 
 func TestGetDoesNotCloseOpenPoll(t *testing.T) {
 	s := newStore(t)
-	p := createPoll(t, s, "alice", "bob")
-	castVotes(t, s, p.ID, map[string]int{"alice": 0})
+	p := createPoll(t, s, "alice@example.com", "bob@example.com")
+	castVotes(t, s, p.ID, map[string]int{"alice@example.com": 0})
 
 	if _, err := s.Get(t.Context(), p.ID); err != nil {
 		t.Fatalf("Get() error = %v", err)
@@ -153,11 +153,11 @@ func TestGetDoesNotCloseOpenPoll(t *testing.T) {
 // stored status still OPEN.
 func createStuckPoll(t *testing.T, s *Store) poll.Poll {
 	t.Helper()
-	p, err := poll.New("Lunch?", []string{"Tacos", "Pizza"}, []string{"alice", "bob"})
+	p, err := poll.New("Lunch?", []string{"Tacos", "Pizza"}, []string{"alice@example.com", "bob@example.com"})
 	if err != nil {
 		t.Fatalf("poll.New() error = %v", err)
 	}
-	for participant, option := range map[string]int{"alice": 0, "bob": 1} {
+	for participant, option := range map[string]int{"alice@example.com": 0, "bob@example.com": 1} {
 		if err := p.Vote(participant, option); err != nil {
 			t.Fatalf("Vote(%s) error = %v", participant, err)
 		}

@@ -16,7 +16,7 @@ import (
 
 func createStoredPoll(t *testing.T, store *poll.MemoryStore) poll.Poll {
 	t.Helper()
-	p, err := poll.New("Lunch?", []string{"Tacos", "Pizza"}, []string{"alice", "bob"})
+	p, err := poll.New("Lunch?", []string{"Tacos", "Pizza"}, []string{"alice@example.com", "bob@example.com"})
 	if err != nil {
 		t.Fatalf("poll.New() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCreatePoll(t *testing.T) {
 	s, store := newTestServer(t)
 
 	recorder := doRequest(t, s, http.MethodPost, "/polls",
-		`{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice", "bob"]}`)
+		`{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice@example.com", "bob@example.com"]}`)
 
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d (body %q)", recorder.Code, http.StatusCreated, recorder.Body.String())
@@ -78,10 +78,11 @@ func TestCreatePollErrors(t *testing.T) {
 	}{
 		{name: "empty body", body: ""},
 		{name: "malformed JSON", body: `{"question": "Lunch?"`},
-		{name: "wrong field type", body: `{"question": 5, "options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
-		{name: "missing question", body: `{"options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
-		{name: "one option", body: `{"question": "Lunch?", "options": ["Tacos"], "participants": ["alice"]}`},
+		{name: "wrong field type", body: `{"question": 5, "options": ["Tacos", "Pizza"], "participants": ["alice@example.com"]}`},
+		{name: "missing question", body: `{"options": ["Tacos", "Pizza"], "participants": ["alice@example.com"]}`},
+		{name: "one option", body: `{"question": "Lunch?", "options": ["Tacos"], "participants": ["alice@example.com"]}`},
 		{name: "no participants", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"]}`},
+		{name: "participant isn't an email address", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
 	}
 
 	for _, tt := range tests {
@@ -95,7 +96,7 @@ func TestCreatePollErrors(t *testing.T) {
 
 func TestCreatePollBodyTooLarge(t *testing.T) {
 	s, _ := newTestServer(t)
-	body := `{"question": "` + strings.Repeat("a", maxBodyBytes) + `", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`
+	body := `{"question": "` + strings.Repeat("a", maxBodyBytes) + `", "options": ["Tacos", "Pizza"], "participants": ["alice@example.com"]}`
 
 	recorder := doRequest(t, s, http.MethodPost, "/polls", body)
 
@@ -132,9 +133,9 @@ func TestStoreErrors(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{name: "create poll", method: http.MethodPost, path: "/polls", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice"]}`},
+		{name: "create poll", method: http.MethodPost, path: "/polls", body: `{"question": "Lunch?", "options": ["Tacos", "Pizza"], "participants": ["alice@example.com"]}`},
 		{name: "get poll", method: http.MethodGet, path: "/polls/abc"},
-		{name: "cast vote", method: http.MethodPost, path: "/polls/abc/votes", body: `{"participant": "alice", "option": 0}`},
+		{name: "cast vote", method: http.MethodPost, path: "/polls/abc/votes", body: `{"participant": "alice@example.com", "option": 0}`},
 	}
 	storeErrors := []struct {
 		name       string
@@ -179,7 +180,7 @@ func TestCastVote(t *testing.T) {
 	s, store := newTestServer(t)
 	p := createStoredPoll(t, store)
 
-	recorder := doRequest(t, s, http.MethodPost, "/polls/"+p.ID+"/votes", `{"participant": "alice", "option": 1}`)
+	recorder := doRequest(t, s, http.MethodPost, "/polls/"+p.ID+"/votes", `{"participant": "alice@example.com", "option": 1}`)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body %q)", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -202,11 +203,11 @@ func TestCastVote(t *testing.T) {
 func TestCastVoteLastVoteClosesPoll(t *testing.T) {
 	s, store := newTestServer(t)
 	p := createStoredPoll(t, store)
-	if _, err := store.CastVote(t.Context(), p.ID, "alice", 0); err != nil {
+	if _, err := store.CastVote(t.Context(), p.ID, "alice@example.com", 0); err != nil {
 		t.Fatalf("CastVote() error = %v", err)
 	}
 
-	recorder := doRequest(t, s, http.MethodPost, "/polls/"+p.ID+"/votes", `{"participant": "bob", "option": 0}`)
+	recorder := doRequest(t, s, http.MethodPost, "/polls/"+p.ID+"/votes", `{"participant": "bob@example.com", "option": 0}`)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body %q)", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -224,14 +225,14 @@ func TestCastVoteErrors(t *testing.T) {
 		body       string
 		wantStatus int
 	}{
-		{name: "poll not found", missing: true, body: `{"participant": "alice", "option": 0}`, wantStatus: http.StatusNotFound},
-		{name: "not a participant", body: `{"participant": "mallory", "option": 0}`, wantStatus: http.StatusForbidden},
-		{name: "option out of range", body: `{"participant": "alice", "option": 2}`, wantStatus: http.StatusBadRequest},
-		{name: "option missing", body: `{"participant": "alice"}`, wantStatus: http.StatusBadRequest},
+		{name: "poll not found", missing: true, body: `{"participant": "alice@example.com", "option": 0}`, wantStatus: http.StatusNotFound},
+		{name: "not a participant", body: `{"participant": "mallory@example.com", "option": 0}`, wantStatus: http.StatusForbidden},
+		{name: "option out of range", body: `{"participant": "alice@example.com", "option": 2}`, wantStatus: http.StatusBadRequest},
+		{name: "option missing", body: `{"participant": "alice@example.com"}`, wantStatus: http.StatusBadRequest},
 		{name: "malformed JSON", body: `{"participant": `, wantStatus: http.StatusBadRequest},
 		{name: "empty body", body: "", wantStatus: http.StatusBadRequest},
-		{name: "already voted", priorVotes: []string{"alice"}, body: `{"participant": "alice", "option": 1}`, wantStatus: http.StatusConflict},
-		{name: "poll closed", priorVotes: []string{"alice", "bob"}, body: `{"participant": "bob", "option": 1}`, wantStatus: http.StatusConflict},
+		{name: "already voted", priorVotes: []string{"alice@example.com"}, body: `{"participant": "alice@example.com", "option": 1}`, wantStatus: http.StatusConflict},
+		{name: "poll closed", priorVotes: []string{"alice@example.com", "bob@example.com"}, body: `{"participant": "bob@example.com", "option": 1}`, wantStatus: http.StatusConflict},
 	}
 
 	for _, tt := range tests {
