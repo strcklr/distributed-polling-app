@@ -200,6 +200,11 @@ func (s *Store) CastVote(ctx context.Context, pollID, participant string, option
 		return poll.Poll{}, poll.ErrInvalidOption
 	}
 
+	participant, err := poll.NormalizeAddress(participant)
+	if err != nil {
+		return poll.Poll{}, poll.ErrNotParticipant
+	}
+
 	out, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(s.table),
 		Key:       map[string]types.AttributeValue{"id": &types.AttributeValueMemberS{Value: pollID}},

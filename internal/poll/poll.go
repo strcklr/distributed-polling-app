@@ -46,6 +46,10 @@ type Poll struct {
 // New validates the input and returns an open poll with no votes.
 func New(question string, options, participants []string) (Poll, error) {
 	question = strings.TrimSpace(question)
+	participants, err := normalizeParticipants(participants)
+	if err != nil {
+		return Poll{}, fmt.Errorf("%w: %w", ErrInvalidPoll, err)
+	}
 	switch {
 	case question == "":
 		return Poll{}, fmt.Errorf("%w: question is required", ErrInvalidPoll)
@@ -73,10 +77,11 @@ func New(question string, options, participants []string) (Poll, error) {
 // Vote records participant's choice of the option at index option,
 // and closes the poll if it was the last outstanding vote.
 func (p *Poll) Vote(participant string, option int) error {
+	participant, err := NormalizeAddress(participant)
 	switch {
 	case p.Status != StatusOpen:
 		return ErrClosed
-	case !slices.Contains(p.Participants, participant):
+	case err != nil || !slices.Contains(p.Participants, participant):
 		return ErrNotParticipant
 	case option < 0 || option >= len(p.Options):
 		return ErrInvalidOption
