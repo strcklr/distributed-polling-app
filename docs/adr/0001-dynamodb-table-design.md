@@ -113,5 +113,5 @@ Single-voter updates don't contend with each other, so `CastVote` needs no retry
 - **Item size:** DynamoDB items are capped at 400 KB, which bounds a poll to roughly tens of thousands of participants with short names. `poll.New` should enforce an explicit maximum so a large poll fails validation instead of failing the write.
 - **One hot item per poll:** a single item handles up to about 1,000 writes per second. That's far above what a poll with a fixed participant list needs.
 - **Rules in two places:** the voting rules exist both in `Poll.Vote` and in the condition expression. The store's tests must cover each rule against DynamoDB Local so the two can't drift apart.
-- **M3 outbox:** recording an outbox entry in the same write turns the vote into a `TransactWriteItems` call (this update plus an outbox `Put`). The condition expression carries over unchanged. Failures then come back in `CancellationReasons`, one per item in the transaction.
+- **M3 outbox:** superseded by [ADR 0002](0002-outbox.md). Only create and close become `TransactWriteItems` calls. The vote stays a single `UpdateItem`, because a transaction can't return `ALL_NEW`.
 - **Local development:** `compose.yaml` runs DynamoDB Local in memory on port 8000.
