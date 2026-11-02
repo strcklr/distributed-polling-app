@@ -40,15 +40,44 @@ func NewClient(ctx context.Context, endpoint string) (*dynamodb.Client, error) {
 	}), nil
 }
 
-// CreateTable creates table with the key schema from ADR 0001 and waits until
-// it's active. It does nothing if the table already exists.
+// CreateTable creates the polls table with the key schema from ADR 0001 and
+// waits until it's active. It does nothing if the table already exists.
 func CreateTable(ctx context.Context, client *dynamodb.Client, table string) error {
-	_, err := client.CreateTable(ctx, &dynamodb.CreateTableInput{
+	return createTable(ctx, client, &dynamodb.CreateTableInput{
 		TableName:            aws.String(table),
 		AttributeDefinitions: []types.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: types.ScalarAttributeTypeS}},
 		KeySchema:            []types.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: types.KeyTypeHash}},
 		BillingMode:          types.BillingModePayPerRequest,
 	})
+}
+
+// CreateOutboxTable creates the outbox table and its pending index from
+// ADR 0002 and waits until it's active. It does nothing if the table already
+// exists.
+func CreateOutboxTable(ctx context.Context, client *dynamodb.Client, table string) error {
+	return createTable(ctx, client, &dynamodb.CreateTableInput{
+		TableName: aws.String(table),
+		AttributeDefinitions: []types.AttributeDefinition{
+			{AttributeName: aws.String("eventId"), AttributeType: types.ScalarAttributeTypeS},
+			{AttributeName: aws.String("pending"), AttributeType: types.ScalarAttributeTypeS},
+			{AttributeName: aws.String("occurredAt"), AttributeType: types.ScalarAttributeTypeS},
+		},
+		KeySchema: []types.KeySchemaElement{{AttributeName: aws.String("eventId"), KeyType: types.KeyTypeHash}},
+		GlobalSecondaryIndexes: []types.GlobalSecondaryIndex{{
+			IndexName: aws.String(pendingIndex),
+			KeySchema: []types.KeySchemaElement{
+				{AttributeName: aws.String("pending"), KeyType: types.KeyTypeHash},
+				{AttributeName: aws.String("occurredAt"), KeyType: types.KeyTypeRange},
+			},
+			Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
+		}},
+		BillingMode: types.BillingModePayPerRequest,
+	})
+}
+
+func createTable(ctx context.Context, client *dynamodb.Client, input *dynamodb.CreateTableInput) error {
+	table := aws.ToString(input.TableName)
+	_, err := client.CreateTable(ctx, input)
 	if _, ok := errors.AsType[*types.ResourceInUseException](err); ok {
 		return nil
 	}

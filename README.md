@@ -23,20 +23,21 @@ The server stores polls in DynamoDB. For local development, start DynamoDB Local
 
 ```bash
 docker compose up -d
-export DYNAMODB_ENDPOINT=http://localhost:8000 POLLS_TABLE=polls
+export DYNAMODB_ENDPOINT=http://localhost:8000 POLLS_TABLE=polls OUTBOX_TABLE=outbox
 go run ./cmd/createtable
 go run ./cmd/api
 ```
 
-On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"` and `$env:POLLS_TABLE = "polls"`.
+On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`, `$env:POLLS_TABLE = "polls"` and `$env:OUTBOX_TABLE = "outbox"`.
 
 | Variable | Meaning |
 |---|---|
 | `POLLS_TABLE` | Name of the polls table. Required. |
+| `OUTBOX_TABLE` | Name of the outbox table that poll events are written to ([ADR 0002](docs/adr/0002-outbox.md)). Required. |
 | `DYNAMODB_ENDPOINT` | DynamoDB endpoint to use instead of AWS, such as DynamoDB Local. When unset, the server uses the default AWS configuration (credentials, region). |
 | `ADDR` | Address to listen on. Defaults to `:8080`. |
 
-The server exits at startup if `POLLS_TABLE` isn't set or the table doesn't exist. `createtable` does nothing if the table already exists. DynamoDB Local runs in memory, so polls survive restarting the server but not restarting the container; after `docker compose down`, run `createtable` again.
+The server exits at startup if either table name isn't set or either table doesn't exist. `createtable` creates both tables and skips any that already exist. DynamoDB Local runs in memory, so polls survive restarting the server but not restarting the container; after `docker compose down`, run `createtable` again.
 
 To build a binary instead:
 
@@ -60,7 +61,7 @@ docker compose up -d
 DYNAMODB_ENDPOINT=http://localhost:8000 go test ./...
 ```
 
-On PowerShell, set the variable first with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`. Each test creates its own table and deletes it afterwards. CI runs these tests against a DynamoDB Local service container.
+On PowerShell, set the variable first with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`. Each test creates its own tables and deletes them afterwards. CI runs these tests against a DynamoDB Local service container.
 
 Before committing:
 
@@ -116,7 +117,7 @@ On Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. Type `cur
 | Path | What's in it |
 |---|---|
 | `cmd/api` | Entry point for the HTTP server |
-| `cmd/createtable` | Creates the polls table, for local development |
+| `cmd/createtable` | Creates the polls and outbox tables, for local development |
 | `internal/api` | HTTP handlers and routing |
 | `internal/poll` | Poll model, voting rules, `Store` interface and in-memory store |
 | `internal/poll/storetest` | Test suite every `Store` implementation must pass |

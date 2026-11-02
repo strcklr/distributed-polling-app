@@ -36,24 +36,33 @@ func newTestStore(t *testing.T) poll.Store {
 	return newStore(t)
 }
 
-// newStore creates a table with a unique name, so every test starts empty,
-// and deletes it when the test ends.
+// newStore creates polls and outbox tables with unique names, so every test
+// starts empty, and deletes them when the test ends.
 func newStore(t *testing.T) *Store {
 	t.Helper()
 	client := newLocalClient(t)
-	table := "polls-test-" + rand.Text()
+	suffix := rand.Text()
+	table, outbox := "polls-test-"+suffix, "outbox-test-"+suffix
 
 	if err := CreateTable(t.Context(), client, table); err != nil {
 		t.Fatal(err)
 	}
+	deleteTableOnCleanup(t, client, table)
+	if err := CreateOutboxTable(t.Context(), client, outbox); err != nil {
+		t.Fatal(err)
+	}
+	deleteTableOnCleanup(t, client, outbox)
+
+	return NewStore(client, table, outbox)
+}
+
+func deleteTableOnCleanup(t *testing.T, client *dynamodb.Client, table string) {
 	t.Cleanup(func() {
 		// t.Context() is already canceled when cleanup runs.
 		if _, err := client.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String(table)}); err != nil {
 			t.Errorf("delete table %s: %v", table, err)
 		}
 	})
-
-	return NewStore(client, table)
 }
 
 func TestStoreCreateGet(t *testing.T) {
@@ -117,13 +126,14 @@ func TestStoreClosePollIsIdempotent(t *testing.T) {
 	p := createPoll(t, s, "alice")
 
 	for i := range 2 {
-		if err := s.closePoll(t.Context(), p.ID); err != nil {
+		if err := s.closePoll(t.Context(), toItem(p)); err != nil {
 			t.Fatalf("closePoll() call %d error = %v", i+1, err)
 		}
 	}
 	if got := storedStatus(t, s, p.ID); got != poll.StatusClosed {
 		t.Errorf("stored status = %s, want %s", got, poll.StatusClosed)
 	}
+	assertEventIDs(t, s, p.ID+"#created", p.ID+"#closed")
 }
 
 func createPoll(t *testing.T, s *Store, participants ...string) poll.Poll {
