@@ -28,6 +28,12 @@ go run ./cmd/createtable
 go run ./cmd/api
 ```
 
+The email worker runs as its own process, with the same variables. For now it logs each email instead of sending it:
+
+```bash
+go run ./cmd/worker
+```
+
 On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`, `$env:POLLS_TABLE = "polls"` and `$env:OUTBOX_TABLE = "outbox"`.
 
 | Variable | Meaning |
@@ -35,7 +41,8 @@ On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhos
 | `POLLS_TABLE` | Name of the polls table. Required. |
 | `OUTBOX_TABLE` | Name of the outbox table that poll events are written to ([ADR 0002](docs/adr/0002-outbox.md)). Required. |
 | `DYNAMODB_ENDPOINT` | DynamoDB endpoint to use instead of AWS, such as DynamoDB Local. When unset, the server uses the default AWS configuration (credentials, region). |
-| `ADDR` | Address to listen on. Defaults to `:8080`. |
+| `ADDR` | Address the server listens on. Defaults to `:8080`. |
+| `WORKER_ID` | Name the worker claims events under. Must be unique among running workers. Defaults to the hostname and process ID. |
 
 The server exits at startup if either table name isn't set or either table doesn't exist. `createtable` creates both tables and skips any that already exist. DynamoDB Local runs in memory, so polls survive restarting the server but not restarting the container; after `docker compose down`, run `createtable` again.
 
@@ -117,9 +124,11 @@ On Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. Type `cur
 | Path | What's in it |
 |---|---|
 | `cmd/api` | Entry point for the HTTP server |
+| `cmd/worker` | Entry point for the email worker |
 | `cmd/createtable` | Creates the polls and outbox tables, for local development |
 | `internal/api` | HTTP handlers and routing |
 | `internal/poll` | Poll model, voting rules, `Store` interface and in-memory store |
 | `internal/poll/storetest` | Test suite every `Store` implementation must pass |
-| `internal/dynamo` | DynamoDB-backed `Store` |
+| `internal/outbox` | Email worker: reads outbox events, builds one message per recipient and sends them |
+| `internal/dynamo` | DynamoDB-backed `Store`, and the outbox the worker reads |
 | `docs/adr` | Architecture decision records |
