@@ -98,14 +98,14 @@ curl -i -X POST http://localhost:8080/health
 Create a poll. The response's `Location` header and `id` field give its ID:
 
 ```bash
-curl -i -X POST http://localhost:8080/polls -d '{"question":"Lunch?","options":["Tacos","Pizza"],"participants":["alice","bob"]}'
+curl -i -X POST http://localhost:8080/polls -d '{"question":"Lunch?","options":["Tacos","Pizza"],"participants":["alice@example.com","bob@example.com"]}'
 ```
 
 Read it, and vote by option index:
 
 ```bash
 curl -i http://localhost:8080/polls/<id>
-curl -i -X POST http://localhost:8080/polls/<id>/votes -d '{"participant":"alice","option":1}'
+curl -i -X POST http://localhost:8080/polls/<id>/votes -d '{"participant":"alice@example.com","option":1}'
 ```
 
 Once every participant has voted, the poll's `status` is `CLOSED`, and further votes return `409 Conflict`.

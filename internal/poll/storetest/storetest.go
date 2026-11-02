@@ -30,9 +30,9 @@ func RunCreateGet(t *testing.T, newStore NewStore) {
 
 	t.Run("Get round-trips votes, counts and status", func(t *testing.T) {
 		s := newStore(t)
-		p := newPoll(t, "alice", "bob")
-		mustVote(t, &p, "alice", 1)
-		mustVote(t, &p, "bob", 0)
+		p := newPoll(t, "alice@example.com", "bob@example.com")
+		mustVote(t, &p, "alice@example.com", 1)
+		mustVote(t, &p, "bob@example.com", 0)
 		if err := s.Create(t.Context(), p); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -55,7 +55,7 @@ func RunCreateGet(t *testing.T, newStore NewStore) {
 
 	t.Run("Create with an existing ID returns ErrAlreadyExists", func(t *testing.T) {
 		s, p := storeWithPoll(t, newStore)
-		duplicate := newPoll(t, "carol")
+		duplicate := newPoll(t, "carol@example.com")
 		duplicate.ID = p.ID
 
 		err := s.Create(t.Context(), duplicate)
@@ -71,7 +71,7 @@ func RunCreateGet(t *testing.T, newStore NewStore) {
 
 		p.Options[0] = "Sushi"
 		p.Counts[0] = 99
-		p.Votes["mallory"] = 0
+		p.Votes["mallory@example.com"] = 0
 
 		assertStored(t, s, want)
 	})
@@ -85,7 +85,7 @@ func RunCreateGet(t *testing.T, newStore NewStore) {
 		}
 		got.Options[0] = "Sushi"
 		got.Counts[0] = 99
-		got.Votes["mallory"] = 0
+		got.Votes["mallory@example.com"] = 0
 		got.Status = poll.StatusClosed
 
 		assertStored(t, s, p)
@@ -97,20 +97,32 @@ func RunCastVote(t *testing.T, newStore NewStore) {
 	t.Run("records the vote", func(t *testing.T) {
 		s, p := storeWithPoll(t, newStore)
 
-		got, err := s.CastVote(t.Context(), p.ID, "alice", 1)
+		got, err := s.CastVote(t.Context(), p.ID, "alice@example.com", 1)
 		if err != nil {
 			t.Fatalf("CastVote() error = %v", err)
 		}
-		mustVote(t, &p, "alice", 1)
+		mustVote(t, &p, "alice@example.com", 1)
+		assertPollEqual(t, got, p)
+		assertStored(t, s, p)
+	})
+
+	t.Run("matches the participant whatever its casing", func(t *testing.T) {
+		s, p := storeWithPoll(t, newStore)
+
+		got, err := s.CastVote(t.Context(), p.ID, " Alice@Example.COM", 1)
+		if err != nil {
+			t.Fatalf("CastVote() error = %v", err)
+		}
+		mustVote(t, &p, "alice@example.com", 1)
 		assertPollEqual(t, got, p)
 		assertStored(t, s, p)
 	})
 
 	t.Run("last vote closes the poll", func(t *testing.T) {
 		s, p := storeWithPoll(t, newStore)
-		castVotes(t, s, p.ID, "alice", "bob")
+		castVotes(t, s, p.ID, "alice@example.com", "bob@example.com")
 
-		got, err := s.CastVote(t.Context(), p.ID, "carol", 0)
+		got, err := s.CastVote(t.Context(), p.ID, "carol@example.com", 0)
 		if err != nil {
 			t.Fatalf("CastVote() error = %v", err)
 		}
@@ -135,12 +147,12 @@ func RunCastVote(t *testing.T, newStore NewStore) {
 			option      int
 			wantErr     error
 		}{
-			{name: "missing poll", pollID: "missing", participant: "alice", wantErr: poll.ErrNotFound},
-			{name: "not a participant", participant: "mallory", wantErr: poll.ErrNotParticipant},
-			{name: "negative option", participant: "alice", option: -1, wantErr: poll.ErrInvalidOption},
-			{name: "option out of range", participant: "alice", option: 2, wantErr: poll.ErrInvalidOption},
-			{name: "already voted", priorVotes: []string{"alice"}, participant: "alice", wantErr: poll.ErrAlreadyVoted},
-			{name: "closed poll", priorVotes: []string{"alice", "bob", "carol"}, participant: "alice", wantErr: poll.ErrClosed},
+			{name: "missing poll", pollID: "missing", participant: "alice@example.com", wantErr: poll.ErrNotFound},
+			{name: "not a participant", participant: "mallory@example.com", wantErr: poll.ErrNotParticipant},
+			{name: "negative option", participant: "alice@example.com", option: -1, wantErr: poll.ErrInvalidOption},
+			{name: "option out of range", participant: "alice@example.com", option: 2, wantErr: poll.ErrInvalidOption},
+			{name: "already voted", priorVotes: []string{"alice@example.com"}, participant: "alice@example.com", wantErr: poll.ErrAlreadyVoted},
+			{name: "closed poll", priorVotes: []string{"alice@example.com", "bob@example.com", "carol@example.com"}, participant: "alice@example.com", wantErr: poll.ErrClosed},
 		}
 
 		for _, tt := range tests {
@@ -170,7 +182,7 @@ func RunCastVote(t *testing.T, newStore NewStore) {
 		const n = 50
 		participants := make([]string, n)
 		for i := range participants {
-			participants[i] = fmt.Sprintf("voter-%d", i)
+			participants[i] = fmt.Sprintf("voter-%d@example.com", i)
 		}
 		s := newStore(t)
 		p := newPoll(t, participants...)
@@ -227,7 +239,7 @@ func newPoll(t *testing.T, participants ...string) poll.Poll {
 func storeWithPoll(t *testing.T, newStore NewStore) (poll.Store, poll.Poll) {
 	t.Helper()
 	s := newStore(t)
-	p := newPoll(t, "alice", "bob", "carol")
+	p := newPoll(t, "alice@example.com", "bob@example.com", "carol@example.com")
 	if err := s.Create(t.Context(), p); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
