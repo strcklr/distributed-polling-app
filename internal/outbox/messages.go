@@ -14,5 +14,8 @@ package outbox
 // It returns an error for an unknown event type, or for a closed event whose
 // counts don't match its options.
 func Messages(e Event) ([]Message, error) {
+	// TODO(#14): render the subject and body once with text/template (parsed at
+	// package level with template.Must), then copy them into a message per
+	// recipient.
 	return nil, errNotImplemented
 }

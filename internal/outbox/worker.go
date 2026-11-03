@@ -42,6 +42,7 @@ func New(source Source, sender Sender, logger *slog.Logger, cfg Config) *Worker 
 // Run calls Tick right away and then every PollInterval until ctx is
 // canceled, and then returns nil. It logs Tick's errors and keeps going.
 func (w *Worker) Run(ctx context.Context) error {
+	// TODO(#14): Tick, then select on ctx.Done() and a time.Ticker.
 	return errNotImplemented
 }
 
@@ -55,5 +56,7 @@ func (w *Worker) Run(ctx context.Context) error {
 // tick delivers the event again. A failure on one event is logged and doesn't
 // stop the others.
 func (w *Worker) Tick(ctx context.Context) error {
+	// TODO(#14): Pending, then feed an unbuffered channel to Events goroutines
+	// that each claim, fan out with errgroup.SetLimit(Sends), and complete.
 	return errNotImplemented
 }
