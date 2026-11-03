@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.21.17
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
+	golang.org/x/sync v0.24.0
 )
 
 require (
