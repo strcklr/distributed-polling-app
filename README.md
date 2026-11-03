@@ -28,10 +28,10 @@ go run ./cmd/createtable
 go run ./cmd/api
 ```
 
-The email worker runs as its own process, with the same variables. For now it logs each email instead of sending it:
+The email worker runs as its own process, with the same variables. Set `SMTP_ADDR` to send through Mailpit, which `docker compose up -d` also starts, and read the emails at http://localhost:8025. Without `SMTP_ADDR`, the worker logs each email instead of sending it.
 
 ```bash
-go run ./cmd/worker
+SMTP_ADDR=localhost:1025 go run ./cmd/worker
 ```
 
 On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`, `$env:POLLS_TABLE = "polls"` and `$env:OUTBOX_TABLE = "outbox"`.
@@ -43,6 +43,8 @@ On PowerShell, set the variables with `$env:DYNAMODB_ENDPOINT = "http://localhos
 | `DYNAMODB_ENDPOINT` | DynamoDB endpoint to use instead of AWS, such as DynamoDB Local. When unset, the server uses the default AWS configuration (credentials, region). |
 | `ADDR` | Address the server listens on. Defaults to `:8080`. |
 | `WORKER_ID` | Name the worker claims events under. Must be unique among running workers. Defaults to the hostname and process ID. |
+| `SMTP_ADDR` | SMTP server the worker sends through, as `host:port`. When unset, the worker logs emails instead. |
+| `MAIL_FROM` | Address the worker's emails come from. Defaults to `polls@localhost`. |
 
 The server exits at startup if either table name isn't set or either table doesn't exist. `createtable` creates both tables and skips any that already exist. DynamoDB Local runs in memory, so polls survive restarting the server but not restarting the container; after `docker compose down`, run `createtable` again.
 
@@ -69,6 +71,8 @@ DYNAMODB_ENDPOINT=http://localhost:8000 go test ./...
 ```
 
 On PowerShell, set the variable first with `$env:DYNAMODB_ENDPOINT = "http://localhost:8000"`. Each test creates its own tables and deletes them afterwards. CI runs these tests against a DynamoDB Local service container.
+
+The SMTP sender's tests likewise need Mailpit, and are skipped unless `SMTP_ADDR=localhost:1025` and `MAILPIT_URL=http://localhost:8025` are set. Each test emails its own random address, so they don't need an empty inbox.
 
 Before committing:
 
@@ -130,5 +134,6 @@ On Windows PowerShell 5.1, `curl` is an alias for `Invoke-WebRequest`. Type `cur
 | `internal/poll` | Poll model, voting rules, `Store` interface and in-memory store |
 | `internal/poll/storetest` | Test suite every `Store` implementation must pass |
 | `internal/outbox` | Email worker: reads outbox events, builds one message per recipient and sends them |
+| `internal/email` | SMTP sender for the worker's messages |
 | `internal/dynamo` | DynamoDB-backed `Store`, and the outbox the worker reads |
 | `docs/adr` | Architecture decision records |
