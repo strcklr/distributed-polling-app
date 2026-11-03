@@ -12,8 +12,15 @@ jobs:
         image: amazon/dynamodb-local:2.5.2
         ports:
           - 8000:8000
+      mailpit:
+        image: axllent/mailpit:v1.31.6
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       DYNAMODB_ENDPOINT: http://localhost:8000
+      SMTP_ADDR: localhost:1025
+      MAILPIT_URL: http://localhost:8025
     steps:
       - uses: actions/checkout@v7
 

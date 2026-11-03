@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/strcklr/distributed-polling-app/internal/dynamo"
+	"github.com/strcklr/distributed-polling-app/internal/email"
 	"github.com/strcklr/distributed-polling-app/internal/outbox"
 )
 
@@ -46,7 +47,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	w := outbox.New(dynamo.NewOutbox(client, table), outbox.LogSender{Logger: logger}, logger, outbox.Config{
+	var sender outbox.Sender = outbox.LogSender{Logger: logger}
+	if addr := os.Getenv("SMTP_ADDR"); addr != "" {
+		from := os.Getenv("MAIL_FROM")
+		if from == "" {
+			from = "polls@localhost"
+		}
+		sender = email.SMTPSender{Addr: addr, From: from}
+	}
+	sender = outbox.NewRetrySender(sender, outbox.RetryConfig{
+		MaxAttempts: 4,
+		BaseDelay:   200 * time.Millisecond,
+		MaxDelay:    5 * time.Second,
+	})
+
+	w := outbox.New(dynamo.NewOutbox(client, table), sender, logger, outbox.Config{
 		ID:           id,
 		PollInterval: 2 * time.Second,
 		Lease:        2 * time.Minute,
