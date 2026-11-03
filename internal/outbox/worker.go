@@ -2,8 +2,12 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Config tunes a Worker. Every field must be set.
@@ -42,8 +46,21 @@ func New(source Source, sender Sender, logger *slog.Logger, cfg Config) *Worker 
 // Run calls Tick right away and then every PollInterval until ctx is
 // canceled, and then returns nil. It logs Tick's errors and keeps going.
 func (w *Worker) Run(ctx context.Context) error {
-	// TODO(#14): Tick, then select on ctx.Done() and a time.Ticker.
-	return errNotImplemented
+	ticker := time.NewTicker(w.cfg.PollInterval)
+
+	defer ticker.Stop()
+
+	for {
+		if err := w.Tick(ctx); err != nil {
+			w.logger.Error("run tick", "err", err)
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 // Tick reads up to BatchSize pending events and hands them through a channel
@@ -56,7 +73,64 @@ func (w *Worker) Run(ctx context.Context) error {
 // tick delivers the event again. A failure on one event is logged and doesn't
 // stop the others.
 func (w *Worker) Tick(ctx context.Context) error {
-	// TODO(#14): Pending, then feed an unbuffered channel to Events goroutines
-	// that each claim, fan out with errgroup.SetLimit(Sends), and complete.
-	return errNotImplemented
+	events, err := w.source.Pending(ctx, w.cfg.BatchSize)
+	if err != nil {
+		return err
+	}
+
+	ch := make(chan Event)
+	var wg sync.WaitGroup
+	for range w.cfg.Events {
+		wg.Go(func() {
+			for e := range ch {
+				w.deliver(ctx, e)
+			}
+		})
+	}
+
+	for _, e := range events {
+		ch <- e
+	}
+
+	close(ch)
+	wg.Wait()
+
+	return nil
+}
+
+func (w *Worker) deliver(ctx context.Context, e Event) {
+	log := w.logger.With("eventID", e.ID, "pollID", e.PollID)
+	if err := w.source.Claim(ctx, e.ID, w.cfg.ID, w.cfg.Lease); err != nil {
+		if errors.Is(err, ErrNotAvailable) {
+			log.Debug("event already claimed", "err", err)
+			return
+		}
+		log.Error("error claiming event", "err", err)
+		return
+	}
+
+	msgs, err := Messages(e)
+	if err != nil {
+		log.Error("create messages", "err", err)
+		return
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(w.cfg.Sends)
+	for _, m := range msgs {
+		g.Go(func() error { return w.sender.Send(gctx, m) })
+	}
+
+	if err := g.Wait(); err != nil {
+		log.Error("deliver message", "err", err)
+		return
+	}
+
+	if err := w.source.Complete(ctx, e.ID, w.cfg.ID); err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			log.Warn("complete message, lost lease", "err", err)
+		} else {
+			log.Error("complete message", "err", err)
+		}
+	}
 }
