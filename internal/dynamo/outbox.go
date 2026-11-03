@@ -16,8 +16,6 @@ import (
 
 var _ outbox.Source = (*Outbox)(nil)
 
-var errNotImplemented = errors.New("not implemented")
-
 // Outbox is an outbox.Source backed by the outbox table. A claim is a lease
 // recorded on the event as leaseUntil and claimedBy, as in ADR 0002.
 type Outbox struct {
