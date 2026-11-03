@@ -33,3 +33,15 @@ type eventPayload struct {
 	Recipients []string `dynamodbav:"recipients"`
 	Counts     []int    `dynamodbav:"counts,omitempty"`
 }
+
+func (e eventItem) toEvent() outbox.Event {
+	return outbox.Event{
+		ID:         e.EventID,
+		Type:       outbox.EventType(e.Type),
+		PollID:     e.PollID,
+		Question:   e.Payload.Question,
+		Options:    e.Payload.Options,
+		Recipients: e.Payload.Recipients,
+		Counts:     e.Payload.Counts,
+	}
+}
