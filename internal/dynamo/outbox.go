@@ -3,9 +3,12 @@ package dynamo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/strcklr/distributed-polling-app/internal/outbox"
 )
@@ -37,10 +40,28 @@ func (o *Outbox) Pending(ctx context.Context, limit int) ([]outbox.Event, error)
 // Claim sets leaseUntil and claimedBy if the event is pending and has no
 // lease, or its lease has expired.
 func (o *Outbox) Claim(ctx context.Context, eventID, owner string, lease time.Duration) error {
-	// TODO(#14): conditional UpdateItem from ADR 0002's claim expression, with
-	// times from o.now() in Unix milliseconds. A failed condition is
-	// outbox.ErrNotAvailable.
-	return errNotImplemented
+	now := o.now()
+	_, err := o.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:        aws.String(o.table),
+		Key:              map[string]types.AttributeValue{"eventId": &types.AttributeValueMemberS{Value: eventID}},
+		UpdateExpression: aws.String("SET leaseUntil = :until, claimedBy = :me"),
+		ConditionExpression: aws.String(`
+			attribute_exists(pending)
+			AND (attribute_not_exists(leaseUntil) OR leaseUntil < :now)
+		`),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":until": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", now.Add(lease).UnixMilli())},
+			":me":    &types.AttributeValueMemberS{Value: owner},
+			":now":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", now.UnixMilli())},
+		},
+	})
+	if err != nil {
+		if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
+			return outbox.ErrNotAvailable
+		}
+		return err
+	}
+	return nil
 }
 
 // Complete removes pending, leaseUntil and claimedBy if owner holds the
