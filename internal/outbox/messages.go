@@ -12,11 +12,11 @@ const (
 	closedSubject  = "Results: {{.Question}}"
 
 	createdBody = `{{.Question}}
-{{range $i, $o := .Options}}  {{$i}}: {{$o}}
+{{range $i, $o := .Options}}	{{$i}}: {{$o}}
 {{end}}
 Vote with: POST /polls/{{.PollID}}/votes`
 	closedBody = `{{.Question}}
-{{range $i, $o := .Options}}{{$o}}: {{index $.Counts $i}}
+{{range $i, $o := .Options}}	{{$o}}: {{index $.Counts $i}}
 {{end}}
 {{winner .}}`
 )
