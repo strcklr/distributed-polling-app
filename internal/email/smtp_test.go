@@ -36,7 +36,9 @@ func TestSMTPSenderDelivers(t *testing.T) {
 	if got.Subject != m.Subject {
 		t.Errorf("Subject = %q, want %q", got.Subject, m.Subject)
 	}
-	if body := strings.TrimSpace(api.text(t, got.ID)); body != m.Body {
+	// SMTP sends lines ending in CRLF, so Mailpit returns the body that way.
+	body := strings.ReplaceAll(strings.TrimSpace(api.text(t, got.ID)), "\r\n", "\n")
+	if body != m.Body {
 		t.Errorf("body = %q, want %q", body, m.Body)
 	}
 }
@@ -77,7 +79,7 @@ func TestSMTPSenderMessageIDIsStable(t *testing.T) {
 	s, api := newMailpit(t)
 	m := testMessage(t)
 	other := m
-	other.To = "other-" + m.To
+	other.To = testMessage(t).To
 
 	for _, msg := range []outbox.Message{m, m, other} {
 		if err := s.Send(t.Context(), msg); err != nil {
