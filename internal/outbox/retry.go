@@ -3,6 +3,8 @@ package outbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"time"
 )
 
@@ -42,15 +44,33 @@ func NewRetrySender(next Sender, cfg RetryConfig) *RetrySender {
 // ErrPermanent, and with an error wrapping ctx.Err() if ctx is done while it
 // waits.
 func (s *RetrySender) Send(ctx context.Context, m Message) error {
-	// TODO(#15): loop up to MaxAttempts calling s.next.Send. Stop on success
-	// or ErrPermanent. Between tries, wait with a select on a timer and
-	// ctx.Done(), as Run does with its ticker.
-	return errNotImplemented
+	delay := s.cfg.BaseDelay
+
+	var err error
+	for i := range s.cfg.MaxAttempts {
+		if err = s.next.Send(ctx, m); err == nil {
+			return nil
+		}
+
+		if errors.Is(err, ErrPermanent) {
+			return err
+		}
+
+		if i < s.cfg.MaxAttempts-1 {
+			select {
+			case <-time.After(s.jitter(delay)):
+			case <-ctx.Done():
+				return fmt.Errorf("%w after: %w", ctx.Err(), err)
+			}
+
+			delay = min(delay*2, s.cfg.MaxDelay)
+		}
+	}
+
+	return err
 }
 
 // fullJitter returns a random duration from 0 to d, inclusive.
 func fullJitter(d time.Duration) time.Duration {
-	// TODO(#15): use math/rand/v2. rand.N is generic, so it works on a
-	// time.Duration directly.
-	return d
+	return rand.N(d + 1)
 }
